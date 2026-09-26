@@ -1,0 +1,28 @@
+# Dependencies and generated output
+/node_modules/
+/dist/
+/.angular/
+/coverage/
+/out-tsc/
+/.vercel/
+*.log
+
+# Local credentials (Firebase browser configuration is public and stays in src)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*-firebase-adminsdk-*.json
+service-account*.json
+serviceAccount*.json
+
+# Local tools and operating system
+/.idea/
+/.vscode/
+/.cim/
+/.fio/
+/.dio/
+.DS_Store
+Thumbs.db
+Desktop.ini

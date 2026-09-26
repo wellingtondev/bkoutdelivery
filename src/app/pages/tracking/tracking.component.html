@@ -1,0 +1,44 @@
+<main class="tracking-page">
+  <div class="tracking-brand"><span class="brand-icon">🐺</span><b>BLACKOUT<span> DELIVERY</span></b><span class="secure-link">Acompanhamento do pedido</span></div>
+  @if (state()?.loading) {
+    <section class="tracking-empty" role="status"><span class="loader"></span><h1>Buscando seu pedido</h1><p>Carregando as últimas atualizações...</p></section>
+  } @else if (delivery(); as d) {
+    <section class="tracking-heading">
+      <div class="status-label" [class.complete]="progress() === 3"><span></span>{{progress() === 3 ? 'ENTREGUE' : progress() === 2 ? 'EM ROTA' : 'PEDIDO CONFIRMADO'}}</div>
+      <h1>{{title()}}</h1><p>Olá, <strong>{{d.customerName}}</strong>. {{subtitle()}}</p>
+    </section>
+    <div class="tracking-layout">
+      <section class="tracking-map-card">
+        <div class="section-heading"><h2>Trajeto da entrega</h2><span class="live-badge" [class.live]="isLive()">{{isLive() ? '● AO VIVO' : progress() === 3 ? 'FINALIZADO' : 'GPS PAUSADO'}}</span></div>
+        @if(d.destination || position()) {
+          <app-delivery-map [destination]="d.destination ?? null" [driverPosition]="position()"></app-delivery-map>
+        } @else {
+          <div class="map-placeholder"><span>⌖</span><h3>Destino ainda não marcado</h3><p>A loja não informou um ponto no mapa para este pedido. As atualizações de status continuam disponíveis abaixo.</p></div>
+        }
+        <div class="map-caption" role="status">
+          <span class="caption-icon">{{isLive() ? '↗' : '◷'}}</span>
+          <div><b>{{isLive() ? 'Localização compartilhada pelo entregador' : progress() === 3 ? 'O compartilhamento foi encerrado' : 'Aguardando atualização de localização'}}</b>
+          <small>@if(isLive()){Atualizado às {{positionTime() | date:'HH:mm:ss'}} · Precisão aproximada: {{d.driverLocation?.accuracy | number:'1.0-0'}} m}
+          @else if(progress() !== 3){A posição aparece quando o entregador ativa o GPS. Atualizações antigas não são exibidas como ao vivo.}
+          @else{Seu pedido foi marcado como entregue.}</small></div>
+        </div>
+      </section>
+      <aside>
+        <section class="tracking-panel"><p class="panel-eyebrow">ETAPAS DO PEDIDO</p>
+          <ol class="steps">
+            <li class="done"><span>✓</span><div><b>Pedido confirmado</b><small>Recebemos seu pedido.</small></div></li>
+            <li [class.done]="progress() >= 2"><span>{{progress() >= 2 ? '✓' : '2'}}</span><div><b>Saiu para entrega</b><small>O entregador está a caminho.</small></div></li>
+            <li [class.done]="progress() === 3"><span>{{progress() === 3 ? '✓' : '3'}}</span><div><b>Entregue</b><small>Confirmação de recebimento.</small></div></li>
+          </ol>
+        </section>
+        <section class="tracking-panel order-panel"><p class="panel-eyebrow">SEU PEDIDO</p><h2>{{d.product}}</h2>
+          <div><span>Valor do pedido</span><b>{{d.orderValue | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</b></div>
+          <div><span>Pagamento</span><b class="payment" [class.paid]="d.paid">{{d.paid ? 'Pago' : 'Pendente'}}</b></div>
+        </section>
+      </aside>
+    </div>
+    <p class="tracking-footer">BLACKOUT DELIVERY <span>•</span> Compartilhe este link somente com quem receberá o pedido.</p>
+  } @else {
+    <section class="tracking-empty"><h1>{{state()?.error ? 'Não foi possível carregar o pedido' : 'Pedido não encontrado'}}</h1><p>{{state()?.error ? 'Confira sua conexão e recarregue a página.' : 'Confira o link de acompanhamento enviado pela loja.'}}</p></section>
+  }
+</main>

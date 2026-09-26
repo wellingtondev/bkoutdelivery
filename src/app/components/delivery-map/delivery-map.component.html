@@ -1,0 +1,18 @@
+<div class="map-shell">
+  <div #canvas class="map-canvas" role="region" [attr.aria-label]="selectable ? 'Mapa para marcar o destino da entrega. Use as setas para mover e os controles para ampliar.' : 'Mapa do destino e da última localização do entregador'"></div>
+  <div class="map-legend" aria-label="Legenda do mapa">
+    <span><i class="destination-dot"></i>Destino</span>
+    @if (driverPosition) { <span><i class="driver-dot"></i>Entregador</span> }
+  </div>
+</div>
+@if (tileError()) {
+  <p class="map-message" role="status">Não foi possível carregar parte do mapa. Confira sua conexão; o endereço e as coordenadas continuam disponíveis.</p>
+}
+@if (selectable) {
+  <div class="map-actions">
+    <button type="button" (click)="locate()" [disabled]="locating()">{{ locating() ? 'Localizando…' : 'Minha localização' }}</button>
+    <button type="button" (click)="selectCenter()">Marcar centro do mapa</button>
+  </div>
+  <p class="map-hint">Clique no endereço no mapa ou arraste o marcador vermelho. Você também pode mover o mapa com as setas e marcar o centro.</p>
+  @if (locationMessage()) { <p class="map-message" role="status">{{ locationMessage() }}</p> }
+}

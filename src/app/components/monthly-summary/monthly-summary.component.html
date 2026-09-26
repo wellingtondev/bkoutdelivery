@@ -1,0 +1,25 @@
+<section class="closing" aria-labelledby="closing-title">
+  <header class="section-heading">
+    <div><p class="eyebrow">RESULTADOS DA LOJA</p><h2 id="closing-title">Fechamento mensal</h2><p class="muted">Entregas concluídas pela data de confirmação, no horário de Brasília.</p></div>
+    <div class="month-controls"><button type="button" aria-label="Mês anterior" (click)="changeMonth(-1)">‹</button><span aria-live="polite">{{ monthLabel }}</span><button type="button" aria-label="Próximo mês" (click)="changeMonth(1)">›</button><button type="button" class="today" (click)="currentMonth()">Hoje</button></div>
+  </header>
+  <div class="totals" aria-live="polite">
+    <article><span>Entregas concluídas</span><strong>{{ closing.count }}</strong><small>No mês selecionado</small></article>
+    <article><span>Valor dos pedidos</span><strong>{{ money(closing.orderCents) }}</strong><small>Sem taxas de entrega</small></article>
+    <article class="fee"><span>Taxas de entrega</span><strong>{{ money(closing.feeCents) }}</strong><small>Separadas dos pedidos</small></article>
+  </div>
+  <p class="legacy" *ngIf="closing.missingDates">{{ closing.missingDates }} entrega(s) concluída(s) sem data de conclusão válida não entram no fechamento. A data da remessa não substitui essa informação.</p>
+  <p class="muted note">Os valores representam entregas concluídas; não são um comprovante de recebimento dos pagamentos.</p>
+  <div class="detail-grid">
+    <div class="calendar"><div class="calendar-heading"><h3>Calendário de entregas</h3><span>Selecione um dia</span></div>
+      <div class="days"><span class="weekday" *ngFor="let weekday of weekdays">{{ weekday }}</span><span *ngFor="let blank of blanks" aria-hidden="true"></span>
+        <button type="button" *ngFor="let day of closing.days" [class.selected]="day.day === selectedDay" [class.has-deliveries]="day.count > 0" [class.current-day]="isToday(day.key)" [attr.aria-pressed]="day.day === selectedDay" [attr.aria-label]="day.key + ': ' + day.count + ' entregas concluídas'" (click)="selectedDay = day.day"><span>{{ day.day }}</span><small *ngIf="day.count">{{ day.count }}<span class="count-label"> entrega{{ day.count === 1 ? '' : 's' }}</span></small></button>
+      </div>
+    </div>
+    <div class="day-detail" aria-live="polite"><p class="eyebrow">FECHAMENTO DO DIA</p><h3>{{ selectedLabel }}</h3>
+      <div class="day-totals"><span>{{ selected.count }} entrega(s)</span><span>Pedidos <b>{{ money(selected.orderCents) }}</b></span><span>Taxas <b>{{ money(selected.feeCents) }}</b></span></div>
+      <p class="empty" *ngIf="!selected.count">Nenhuma entrega concluída neste dia.</p>
+      <ul *ngIf="selected.count"><li *ngFor="let delivery of selected.deliveries"><div><strong>{{ delivery.customerName }}</strong><span>{{ delivery.product }}</span></div><div class="amounts"><span>Pedido {{ money(delivery.orderValue * 100) }}</span><small>Taxa {{ money(delivery.deliveryFee * 100) }}</small></div></li></ul>
+    </div>
+  </div>
+</section>
