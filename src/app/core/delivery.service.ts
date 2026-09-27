@@ -4,6 +4,8 @@ import { addDoc, collection, doc, onSnapshot, runTransaction, serverTimestamp, w
 import { Observable, Subscription } from 'rxjs';
 import { Delivery, NewDelivery, PublicTracking, Shipment } from '../models/models';
 import { auth, db } from './firebase';
+import { normalizePayment } from './payment';
+import { routeEntries, routeEntry, routeKey } from './delivery-route';
 
 @Injectable({ providedIn: 'root' })
 export class DeliveryService implements OnDestroy {
@@ -95,6 +97,7 @@ export class DeliveryService implements OnDestroy {
     if (!delivery.address.trim() || !Number.isFinite(delivery.lat) || !Number.isFinite(delivery.lng) || Math.abs(delivery.lat!) > 90 || Math.abs(delivery.lng!) > 180) {
       throw new Error('Informe o endereço e confirme o destino no mapa.');
     }
+    const payment = normalizePayment(delivery);
     const deliveryRef = doc(collection(db, 'shipments', shipmentId, 'deliveries'));
     const trackingCode = crypto.randomUUID();
     const batch = writeBatch(db);
@@ -103,7 +106,7 @@ export class DeliveryService implements OnDestroy {
       customerName: delivery.customerName, phone: delivery.phone, address: delivery.address,
       lat: delivery.lat, lng: delivery.lng,
       product: delivery.product, orderValue: delivery.orderValue, deliveryFee: delivery.deliveryFee,
-      paid: delivery.paid, status: 'WAITING', createdAt: serverTimestamp()
+      paid: delivery.paid, ...payment, status: 'WAITING', createdAt: serverTimestamp()
     });
     batch.set(doc(db, 'tracking', trackingCode), {
       trackingCode, shipmentId, deliveryId: deliveryRef.id,
@@ -139,19 +142,85 @@ export class DeliveryService implements OnDestroy {
 
   async finishDelivery(shipmentId: string, deliveryId: string, trackingCode: string): Promise<void> {
     const deliveryRef = doc(db, 'shipments', shipmentId, 'deliveries', deliveryId);
+    const driverId = auth.currentUser?.uid;
+    if (!driverId) throw new Error('Entre novamente para confirmar a entrega.');
+    const manifestRef = doc(db, 'driverLocations', driverId);
     await runTransaction(db, async transaction => {
       const snapshot = await transaction.get(deliveryRef);
       if (!snapshot.exists()) throw new Error('Entrega não encontrada.');
       // Retries must not move a completed delivery into another month's closing.
       if (snapshot.data()['status'] === 'DELIVERED') return;
-      const driverId = auth.currentUser?.uid;
-      if (!driverId) throw new Error('Entre novamente para confirmar a entrega.');
       if (snapshot.data()['driverId'] && snapshot.data()['driverId'] !== driverId) {
         throw new Error('Esta entrega está com outro entregador.');
       }
-      const update = { status: 'DELIVERED', deliveredAt: serverTimestamp(), trackingActive: false, driverLocation: null };
+      const manifest = await transaction.get(manifestRef);
+      const entries = routeEntries(manifest.data()?.['routeEntries']).filter(entry => entry.id !== deliveryId || entry.shipmentId !== shipmentId);
+      const remaining = [];
+      for (const entry of entries) {
+        const ref = doc(db, 'shipments', entry.shipmentId, 'deliveries', entry.id);
+        const current = await transaction.get(ref);
+        if (current.exists() && current.data()['driverId'] === driverId && current.data()['status'] !== 'DELIVERED') remaining.push({ entry, ref });
+      }
+      if (auth.currentUser?.uid !== driverId) throw new Error('Entre novamente para confirmar a entrega.');
+      const update = { status: 'DELIVERED', deliveredAt: serverTimestamp(), trackingActive: false, driverLocation: null, routePosition: null, estimatedArrival: null };
       transaction.update(deliveryRef, { ...update, driverId });
       transaction.update(doc(db, 'tracking', trackingCode), update);
+      remaining.forEach(({ entry, ref }, index) => {
+        transaction.update(ref, { routeOrder: index + 1 });
+        transaction.update(doc(db, 'tracking', entry.trackingToken), { routePosition: index + 1 });
+      });
+      if (manifest.exists()) transaction.set(manifestRef, { routeEntries: remaining.map(item => item.entry) }, { merge: true });
+    });
+  }
+
+  async saveRoute(deliveryIds: string[], estimates: Record<string, string | null> = {}, calculatedPoints?: Record<string, {lat?:number;lng?:number}>): Promise<void> {
+    const driverId = auth.currentUser?.uid;
+    if (!driverId) throw new Error('Entre novamente para organizar a rota.');
+    if (!deliveryIds.length || deliveryIds.length > 100) throw new Error('Selecione entre 1 e 100 entregas.');
+    if (new Set(deliveryIds).size !== deliveryIds.length) throw new Error('A rota contém entrega repetida.');
+    const now = Date.now();
+    for (const [id, estimate] of Object.entries(estimates)) {
+      if (!deliveryIds.includes(id)) throw new Error('A previsão deve pertencer a uma entrega da rota.');
+      if (estimate === null) continue;
+      const parsed = typeof estimate === 'string' ? new Date(estimate) : new Date(NaN);
+      if (typeof estimate !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(estimate) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().replace('.000Z', 'Z') !== estimate.replace('.000Z', 'Z') || parsed.getTime() <= now || parsed.getTime() > now + 7 * 86400000) {
+        throw new Error('Informe uma previsão futura válida, com data e horário, dentro dos próximos 7 dias.');
+      }
+    }
+    const selected = deliveryIds.map(id => {
+      const delivery = this.deliveries().find(item => item.id === id);
+      if (!delivery) throw new Error('Entrega não encontrada. Atualize a lista.');
+      return routeEntry(delivery);
+    });
+    const selectedKeys = new Set(selected.map(routeKey));
+    const manifestRef = doc(db, 'driverLocations', driverId);
+    await runTransaction(db, async transaction => {
+      const manifest = await transaction.get(manifestRef);
+      const previous = routeEntries(manifest.data()?.['routeEntries']).filter(entry => !selectedKeys.has(routeKey(entry)));
+      const all = [...selected, ...previous];
+      if (all.length > 100) throw new Error('A rota comporta até 100 entregas.');
+      const active = [];
+      for (const entry of all) {
+        const ref = doc(db, 'shipments', entry.shipmentId, 'deliveries', entry.id);
+        const current = await transaction.get(ref);
+        const data = current.data();
+        const requested = selectedKeys.has(routeKey(entry));
+        if (!current.exists()) { if (requested) throw new Error('Entrega não encontrada.'); else continue; }
+        if (data!['status'] === 'DELIVERED') { if (requested) throw new Error('Esta entrega já foi concluída.'); else continue; }
+        if (data!['driverId'] && data!['driverId'] !== driverId) { if (requested) throw new Error('Esta entrega está com outro entregador.'); else continue; }
+        if (calculatedPoints && requested) {
+          const point=calculatedPoints[entry.id];
+          if(!point || point.lat!==data!['lat'] || point.lng!==data!['lng']) throw new Error('O destino mudou durante o cálculo. Recalcule a rota.');
+        }
+        active.push({ entry, ref });
+      }
+      if (auth.currentUser?.uid !== driverId) throw new Error('Entre novamente para organizar a rota.');
+      active.forEach(({ entry, ref }, index) => {
+        const estimate = Object.prototype.hasOwnProperty.call(estimates, entry.id) ? { estimatedArrival: estimates[entry.id] } : calculatedPoints ? {estimatedArrival:null} : {};
+        transaction.update(ref, { driverId, routeOrder: index + 1, ...estimate });
+        transaction.update(doc(db, 'tracking', entry.trackingToken), { routePosition: index + 1, ...estimate });
+      });
+      transaction.set(manifestRef, { routeEntries: active.map(item => item.entry) }, { merge: true });
     });
   }
 
@@ -159,6 +228,50 @@ export class DeliveryService implements OnDestroy {
     const delivery = this.deliveries().find(item => item.id === deliveryId);
     if (!delivery) throw new Error('Entrega não encontrada.');
     await this.finishDelivery(delivery.shipmentId, delivery.id, delivery.trackingToken);
+  }
+
+  async manageDelivery(shipmentId: string, deliveryId: string, action: 'paid' | 'delete'): Promise<void> {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('Entre novamente para atualizar a entrega.');
+    if (!['paid', 'delete'].includes(action)) throw new Error('Ação inválida.');
+    await runTransaction(db, async transaction => {
+      const profile = await transaction.get(doc(db, 'users', uid));
+      if (profile.data()?.['role'] !== 'STORE' || profile.data()?.['active'] === false) throw new Error('Somente a loja pode alterar o pagamento ou excluir entregas.');
+      const ref = doc(db, 'shipments', shipmentId, 'deliveries', deliveryId);
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) throw new Error('A entrega não existe mais. Atualize a página.');
+      const data = snapshot.data();
+      const token = data['trackingToken'] ?? data['trackingCode'];
+      const trackingRef = token ? doc(db, 'tracking', token) : null;
+      const tracking = trackingRef ? await transaction.get(trackingRef) : null;
+      const manifestRef = action === 'delete' && data['driverId'] ? doc(db, 'driverLocations', data['driverId']) : null;
+      const manifest = manifestRef ? await transaction.get(manifestRef) : null;
+      const remaining = [];
+      if (manifest?.exists()) {
+        for (const entry of routeEntries(manifest.data()?.['routeEntries'])) {
+          if (entry.id === deliveryId && entry.shipmentId === shipmentId) continue;
+          const peerRef = doc(db, 'shipments', entry.shipmentId, 'deliveries', entry.id);
+          const peer = await transaction.get(peerRef);
+          if (!peer.exists() || peer.data()['status'] === 'DELIVERED' || peer.data()['driverId'] !== data['driverId']) continue;
+          const peerTrackingRef = doc(db, 'tracking', entry.trackingToken);
+          const peerTracking = await transaction.get(peerTrackingRef);
+          remaining.push({ entry, ref: peerRef, trackingRef: peerTracking.exists() ? peerTrackingRef : null });
+        }
+      }
+      if (auth.currentUser?.uid !== uid) throw new Error('Sua sessão mudou. Entre novamente.');
+      if (action === 'paid') {
+        if (!data['paid']) transaction.update(ref, { paid: true, paidAt: serverTimestamp() });
+        if (trackingRef && tracking?.exists()) transaction.update(trackingRef, { paid: true });
+      } else {
+        transaction.delete(ref);
+        if (trackingRef) transaction.delete(trackingRef);
+        remaining.forEach((peer, index) => {
+          transaction.update(peer.ref, { routeOrder: index + 1, estimatedArrival: null });
+          if (peer.trackingRef) transaction.update(peer.trackingRef, { routePosition: index + 1, estimatedArrival: null });
+        });
+        if (manifestRef && manifest?.exists()) transaction.update(manifestRef, { routeEntries: remaining.map(peer => peer.entry) });
+      }
+    });
   }
 
   private async updateStatus(shipmentId: string, deliveryId: string, trackingCode: string, update: object): Promise<void> {

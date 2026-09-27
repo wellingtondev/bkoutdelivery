@@ -74,3 +74,8 @@ test('empty calendar includes leap day and correct Sunday-based offset', () => {
   assert.equal(result.days[28].count, 0);
   assert.equal(result.days[28].groups.length, 0);
 });
+
+test('REQ05 own completed fees today are summed in cents independently of selected month', () => {
+ const data=[delivery({deliveryFee:0.1}),delivery({id:'two',deliveryFee:0.2}),delivery({driverId:'other',deliveryFee:100}),delivery({status:'WAITING',deliveryFee:100})];
+ assert.equal(driverHistory(data,[],'driver-one',2026,8,now).todayFeeCents,30);
+});

@@ -15,11 +15,11 @@ import { Delivery, NewDelivery, PublicTracking, Shipment } from '../../src/app/m
 registerLocaleData(localePt, 'pt-BR');
 const now = new Date();
 const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
-const destination = { lat: -23.5505, lng: -46.6333 };
+const destination = { lat: -19.74999, lng: -47.93670 };
 const base: Delivery = {
   id: 'fixture-1', trackingToken: 'demo', shipmentId: 'fixture-shipment',
   customerName: 'Cliente de demonstração', phone: '(11) 00000-0000',
-  address: 'Praça da Sé, São Paulo — SP (destino de demonstração)',
+  address: 'Praça Rui Barbosa, Uberaba — MG (destino público de teste)',
   product: 'Pedido de demonstração', orderValue: 120, deliveryFee: 8,
   paid: true, status: 'WAITING', ...destination,
 };
@@ -36,6 +36,7 @@ const service = {
     shipments.update(items => [...items, { ...shipment, id, status: 'WAITING' }]);
     return id;
   },
+  async manageDelivery(shipmentId:string,id:string,action:'paid'|'delete'){ deliveries.update(items=>action==='delete'?items.filter(d=>d.id!==id):items.map(d=>d.id===id?{...d,paid:true}:d)); },
   async add(delivery: NewDelivery): Promise<string> {
     const id = `fixture-${crypto.randomUUID()}`;
     deliveries.update(items => [...items, { ...delivery, id, trackingToken: 'demo', status: 'WAITING' }]);
@@ -45,7 +46,7 @@ const service = {
     const tracking: PublicTracking = {
       trackingCode: 'demo', shipmentId: base.shipmentId, deliveryId: 'fixture-3',
       customerName: 'Diego', product: base.product, orderValue: base.orderValue, paid: true,
-      status: 'OUT_FOR_DELIVERY', destination, trackingActive: true,
+      estimatedArrival:new Date(Date.now()+3600000).toISOString(), routePosition:2, status: 'OUT_FOR_DELIVERY', destination, trackingActive: true,
       driverLocation: { lat: -23.5478, lng: -46.6371, accuracy: 12, updatedAt: new Date() },
     };
     return of(tracking);
@@ -56,11 +57,13 @@ const driverDeliveries = signal<Delivery[]>([
   ...Array.from({length:10}, (_, index) => ({ ...base, id: 'driver-fixture-' + index, customerName: 'Cliente fictício ' + (index + 1), shipmentId: index < 6 ? 'fixture-shipment' : 'fixture-evening', driverId: 'fixture-driver', status: 'DELIVERED' as const, deliveredAt: now.toISOString() })),
   { ...base, id: 'other-driver', driverId: 'another-driver', status: 'DELIVERED', deliveredAt: now.toISOString() },
   { ...base, id: 'legacy-unassigned', status: 'DELIVERED', deliveredAt: now.toISOString() },
-  { ...base, id: 'driver-open', customerName: 'Entrega em aberto · teste' }
+  { ...base, id: 'driver-open', customerName: 'Entrega em aberto · teste',paid:false,paymentMethod:'CREDIT',installments:3,notes:'Tocar o interfone. Cliente de teste.',phone:'34999991234' },
+  { ...base, id: 'driver-open-two', customerName: 'Segunda parada · teste',paid:false,paymentMethod:'PIX',shipmentId:'fixture-evening' }
 ]);
 const driverService = {
   ...service, deliveries: driverDeliveries,
   shipments: signal<Shipment[]>([...shipments(), {id:'fixture-evening',date:today,time:'20:00',status:'WAITING'}]),
+  async saveRoute(ids:string[],estimates:Record<string,string|null>={}) { driverDeliveries.update(items=>items.map(item=>ids.includes(item.id)?{...item,driverId:'fixture-driver',routeOrder:ids.indexOf(item.id)+1,...(item.id in estimates?{estimatedArrival:estimates[item.id]}:{})}:item)); },
   async confirm(id:string) { driverDeliveries.update(items => items.map(item => item.id === id ? {...item, driverId:'fixture-driver', status:'DELIVERED', deliveredAt:new Date().toISOString()} : item)); }
 };
 const previewLocation = {activeDeliveryId:signal<string|null>(null),starting:signal(false),error:signal(''),lastUpdate:signal<Date|null>(null),async start(delivery:Delivery){this.activeDeliveryId.set(delivery.id);},async stop(){this.activeDeliveryId.set(null);}};

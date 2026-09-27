@@ -23,6 +23,8 @@ service cloud.firestore {
     match /driverLocations/{driverId} {
       allow read: if staff();
       allow write: if role('DRIVER') && request.auth.uid == driverId;
+      // Store deletion removes a stop from an existing private route manifest.
+      allow update: if role('STORE') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['routeEntries']);
     }
     match /tracking/{trackingCode} {
       // A client may open its secret link, never enumerate other customers.

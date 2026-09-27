@@ -3,29 +3,56 @@ import { searchUberaba } from '../../core/address-search';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { NewDelivery, Shipment } from '../../models/models';
+import { Delivery, NewDelivery, Shipment } from '../../models/models';
 import { DeliveryService } from '../../core/delivery.service';
 import { DeliveryMapComponent } from '../../components/delivery-map/delivery-map.component';
 import { MonthlySummaryComponent } from '../../components/monthly-summary/monthly-summary.component';
 import { AuthService } from '../../core/auth.service';
+import { amountToCollect, paymentLabel } from '../../core/payment';
 
 @Component({
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent],
   templateUrl: './store.component.html',
   styles: [`
-    .store-actions{display:flex;gap:12px;flex-wrap:wrap}
+    .delivery-actions{display:flex;gap:8px;flex-wrap:wrap}.danger{color:#ff8b83}.delivery{flex-wrap:wrap}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
     .empty-state{text-align:center;padding:36px 24px}
     .empty-state .btn{margin:20px auto 0}
     .feedback{color:#ff8b83;line-height:1.5}
     .shipment-date{margin:0 0 8px;color:#a1a1aa}
     .shipment.selected{border-color:#ff5147}
-    .modal input,.modal select{min-width:0;width:100%}
+    .modal input,.modal select,.modal textarea{min-width:0;width:100%;box-sizing:border-box}
+    .modal textarea{resize:vertical;min-height:90px;background:#09090b;border:1px solid #3f3f46;border-radius:10px;color:#fafafa;padding:12px;font:inherit}
+    .collection-total{padding:14px;border:1px solid #ff5147;border-radius:12px;background:#ff514710}.collection-total strong{display:block;font-size:1.4rem;margin-top:4px}
     .modal .check input{width:auto}
     @media(max-width:760px){.store-actions{width:100%}}
   `]
 })
 export class StoreComponent implements OnDestroy {
+  readonly deliveryAction = signal<{delivery:Delivery;action:'paid'|'delete'}|null>(null);
+  readonly actionPending = signal(false);
+  readonly actionError = signal('');
+  readonly actionMessage = signal('');
+  askAction(delivery:Delivery,action:'paid'|'delete'):void {
+    this.actionError.set(''); this.actionMessage.set(''); this.deliveryAction.set({delivery,action});
+  }
+  async confirmAction():Promise<void> {
+    const selected=this.deliveryAction();
+    if (!selected || this.actionPending()) return;
+    this.actionPending.set(true);this.actionError.set('');
+    try {
+      await this.svc.manageDelivery(selected.delivery.shipmentId,selected.delivery.id,selected.action);
+      this.deliveryAction.set(null);
+      this.actionMessage.set(selected.action==='paid'?'Entrega marcada como paga. O entregador receberá a atualização.':'Entrega excluída e link de acompanhamento removido.');
+    } catch(error) { this.actionError.set(error instanceof Error?error.message:'Não foi possível atualizar a entrega.'); }
+    finally { this.actionPending.set(false); }
+  }
+  readonly amountToCollect = amountToCollect;
+  readonly paymentLabel = paymentLabel;
+  paymentChanged(): void {
+    if (this.form.paid) { this.form.paymentMethod = undefined; this.form.installments = undefined; }
+    else if (this.form.paymentMethod !== 'CREDIT') this.form.installments = undefined;
+  }
   addressStatus = signal('');
   private addressTimer?: ReturnType<typeof setTimeout>;
   private addressRequest?: AbortController;

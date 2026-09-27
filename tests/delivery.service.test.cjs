@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
+const route = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/delivery-route.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: route });
+const payment = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/payment.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: payment });
 
 function setup() {
   const listeners = [];
@@ -33,11 +37,13 @@ function setup() {
       const batch = { writes: [], committed: false };
       batches.push(batch);
       await callback({
-        get: async ref => ({ exists: () => records.has(ref.path), data: () => records.get(ref.path) }),
+        get: async ref => { assert.equal(batch.writes.length, 0, 'transaction reads must precede writes'); return { exists: () => records.has(ref.path), data: () => records.get(ref.path) }; },
+        delete: ref => batch.writes.push({ kind: 'delete', ref }),
+        set: (ref, data) => batch.writes.push({ kind: 'set', ref, data }),
         update: (ref, data) => batch.writes.push({ kind: 'update', ref, data })
       });
       if (commitError) throw commitError;
-      for (const write of batch.writes) records.set(write.ref.path, { ...records.get(write.ref.path), ...write.data });
+      for (const write of batch.writes) { if(write.kind==='delete') records.delete(write.ref.path); else records.set(write.ref.path, { ...records.get(write.ref.path), ...write.data }); }
       batch.committed = true;
     },
     addDoc: async (ref, data) => {
@@ -69,7 +75,8 @@ function setup() {
     'firebase/auth': { onAuthStateChanged: (_auth, callback) => { authCallback = callback; return () => { authStopped = true; }; } },
     'firebase/firestore': firestore,
     'rxjs': require('rxjs'),
-    './firebase': { auth: authState, db: {} }
+    './firebase': { auth: authState, db: {} },
+    './payment': payment, './delivery-route': route
   };
   const source = fs.readFileSync(path.join(__dirname, '../src/app/core/delivery.service.ts'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
@@ -81,7 +88,7 @@ function setup() {
   const service = new exports.DeliveryService();
   const active = refPath => listeners.findLast(listener => listener.ref.path === refPath && !listener.stopped);
   return {
-    service, listeners, batches, additions, active,
+    service, listeners, batches, additions, active, records,
     signIn: user => { authState.currentUser = user; authCallback(user); },
     get authStopped() { return authStopped; },
     failCommit: error => { commitError = error; },
@@ -93,7 +100,25 @@ function setup() {
   };
 }
 
-const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, lat: -23.55, lng: -46.63 };
+const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
+
+test('billing and notes persist privately; paid orders omit stale billing', async () => {
+  for (const paid of [false, true]) {
+    const h = setup();
+    await h.service.createDelivery('s1', { ...order, paid, paymentMethod: 'CREDIT', installments: 2, notes: 'Portão azul' });
+    const [privateWrite, publicWrite] = h.batches[0].writes;
+    assert.equal(privateWrite.data.notes, 'Portão azul');
+    assert.equal(privateWrite.data.paymentMethod, paid ? undefined : 'CREDIT');
+    assert.equal(privateWrite.data.installments, paid ? undefined : 2);
+    for (const key of ['notes', 'paymentMethod', 'installments', 'phone', 'address']) assert.equal(key in publicWrite.data, false);
+  }
+});
+
+test('invalid billing fails before writing any delivery or tracking', async () => {
+  const h = setup();
+  await assert.rejects(h.service.createDelivery('s1', { ...order, paymentMethod: undefined }), /pagamento/);
+  assert.equal(h.batches.length, 0);
+});
 
 test('creates the first shipment with date, time and initial status', async () => {
   const h = setup();
@@ -319,4 +344,162 @@ test('monthly closing: an already delivered record is never dated again, includi
     await h.service.confirm('d1');
     assert.equal(h.batches[0].writes.length, 0);
   }
+});
+
+function routeFixture() {
+  const h = setup(); loadStaff(h);
+  h.emitCollection('shipments', [{ id: 's1' }, { id: 's2' }]);
+  h.emitCollection('shipments/s1/deliveries', [{ ...order, id: 'd1', trackingToken: 't1', status: 'WAITING' }]);
+  h.emitCollection('shipments/s2/deliveries', [{ ...order, shipmentId: 's2', id: 'd2', trackingToken: 't2', status: 'WAITING' }]);
+  return h;
+}
+
+test('REQ-04 route: orders across shipments atomically and publishes positions only', async () => {
+  const h = routeFixture();
+  await h.service.saveRoute(['d2', 'd1']);
+  assert.equal(h.records.get('shipments/s2/deliveries/d2').routeOrder, 1);
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').routeOrder, 2);
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').driverId, 'staff');
+  for (const write of h.batches[0].writes.filter(w => w.ref.path.startsWith('tracking/'))) {
+    assert.deepEqual(Object.keys(write.data), ['routePosition']);
+  }
+});
+
+test('REQ-04 route: duplicates, missing, completed and other owners never write', async () => {
+  const h = routeFixture();
+  await assert.rejects(h.service.saveRoute(['d1', 'd1']), /repetida/);
+  await assert.rejects(h.service.saveRoute(['missing']), /encontrada/);
+  await assert.rejects(h.service.saveRoute(Array.from({length:101}, (_,i)=>String(i))), /100/);
+  h.records.get('shipments/s1/deliveries/d1').driverId = 'other';
+  await assert.rejects(h.service.saveRoute(['d1']), /outro entregador/);
+  h.records.get('shipments/s1/deliveries/d1').driverId = 'staff';
+  h.records.get('shipments/s1/deliveries/d1').status = 'DELIVERED';
+  await assert.rejects(h.service.saveRoute(['d1']), /concluída/);
+  assert.ok(h.batches.every(b => !b.writes.length));
+});
+
+test('REQ-04 route: completion compacts current route and ignores stale completed peers', async () => {
+  const h = routeFixture();
+  await h.service.saveRoute(['d1', 'd2']);
+  // Listener hasn't caught up with ownership/order yet, so replay actual private snapshots.
+  h.emitCollection('shipments/s1/deliveries', [h.records.get('shipments/s1/deliveries/d1')]);
+  h.emitCollection('shipments/s2/deliveries', [h.records.get('shipments/s2/deliveries/d2')]);
+  await h.service.confirm('d1');
+  assert.equal(h.records.get('tracking/t1').routePosition, null);
+  assert.equal(h.records.get('tracking/t2').routePosition, 1);
+  assert.equal(h.records.get('shipments/s2/deliveries/d2').routeOrder, 1);
+  await h.service.confirm('d2');
+  assert.equal(h.records.get('tracking/t2').routePosition, null);
+});
+
+test('REQ-04 route: current manifest retains another device route entries absent from local listeners', async () => {
+  const h = routeFixture();
+  h.records.set('driverLocations/staff', { routeEntries: [{ id: 'remote', shipmentId: 'remote-shipment', trackingToken: 'remote-token' }] });
+  h.records.set('shipments/remote-shipment/deliveries/remote', { status: 'WAITING', driverId: 'staff' });
+  await h.service.saveRoute(['d1']);
+  assert.equal(h.records.get('tracking/remote-token').routePosition, 2);
+  await h.service.confirm('d1');
+  assert.equal(h.records.get('tracking/remote-token').routePosition, 1);
+  assert.equal(h.records.get('driverLocations/staff').routeEntries.length, 1);
+});
+
+test('REQ-04 route: completed peer in stale manifest does not prevent confirmation', async () => {
+  const h = routeFixture();
+  await h.service.saveRoute(['d1', 'd2']);
+  h.records.get('shipments/s2/deliveries/d2').status = 'DELIVERED';
+  await h.service.confirm('d1');
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').status, 'DELIVERED');
+  assert.equal(h.records.get('driverLocations/staff').routeEntries.length, 0);
+});
+
+test('REQ-04 route: denied transaction and signed-out actions do not mutate route', async () => {
+  const h = routeFixture();
+  h.failCommit(new Error('permission-denied'));
+  await assert.rejects(h.service.saveRoute(['d1', 'd2']), /permission-denied/);
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').driverId, undefined);
+  assert.equal(h.records.has('driverLocations/staff'), false);
+  h.signIn(null);
+  await assert.rejects(h.service.saveRoute(['d1']), /Entre novamente/);
+});
+
+test('REQ-04 manual ETA: persists explicit future estimate privately and publicly, preserves absent and clears blank', async () => {
+  const h = routeFixture();
+  const eta = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  await h.service.saveRoute(['d1'], { d1: eta });
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').estimatedArrival, eta);
+  assert.equal(h.records.get('tracking/t1').estimatedArrival, eta);
+  await h.service.saveRoute(['d1']);
+  assert.equal(h.records.get('tracking/t1').estimatedArrival, eta);
+  await h.service.saveRoute(['d1'], { d1: null });
+  assert.equal(h.records.get('tracking/t1').estimatedArrival, null);
+  await h.service.saveRoute(['d1'], { d1: eta });
+  await h.service.confirm('d1');
+  assert.equal(h.records.get('tracking/t1').estimatedArrival, null);
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').estimatedArrival, null);
+});
+
+test('REQ-04 manual ETA: rejects invalid, ambiguous, past, distant or unrelated estimates before writes', async () => {
+  const h = routeFixture();
+  for (const value of ['invalid', '2026-12-01T10:00', new Date(Date.now() - 1000).toISOString(), new Date(Date.now() + 8 * 86400000).toISOString()]) {
+    await assert.rejects(h.service.saveRoute(['d1'], { d1: value }), /previsão/);
+  }
+  await assert.rejects(h.service.saveRoute(['d1'], { unknown: null }), /previsão/);
+  assert.equal(h.batches.length, 0);
+});
+
+
+test('automatic route rejects a destination changed after calculation', async () => {
+ const h=routeFixture();
+ const eta=new Date(Date.now()+3600000).toISOString();
+ await assert.rejects(h.service.saveRoute(['d1'],{d1:eta},{d1:{lat:0,lng:0}}),/destino mudou/);
+ assert.equal(h.records.has('driverLocations/staff'),false);
+});
+test('automatic route clears estimates for remote stops outside calculated sequence', async () => {
+ const h=routeFixture();
+ h.records.set('driverLocations/staff',{routeEntries:[{id:'remote',shipmentId:'remote-shipment',trackingToken:'remote-token'}]});
+ h.records.set('shipments/remote-shipment/deliveries/remote',{status:'WAITING',driverId:'staff'});
+ h.records.set('tracking/remote-token',{estimatedArrival:new Date(Date.now()+3600000).toISOString()});
+ const current=h.records.get('shipments/s1/deliveries/d1');
+ await h.service.saveRoute(['d1'],{d1:new Date(Date.now()+3600000).toISOString()},{d1:{lat:current.lat,lng:current.lng}});
+ assert.equal(h.records.get('tracking/remote-token').estimatedArrival,null);
+});
+
+test('store marks paid atomically without changing delivery status or closure date', async()=>{
+ const h=routeFixture();h.records.set('users/staff',{role:'STORE',active:true});
+ h.records.set('tracking/t1',{paid:false});
+ const old=h.records.get('shipments/s1/deliveries/d1');
+ await h.service.manageDelivery('s1','d1','paid');
+ assert.equal(h.records.get('tracking/t1').paid,true);
+ assert.equal(h.records.get('shipments/s1/deliveries/d1').paid,true);
+ assert.equal(h.records.get('shipments/s1/deliveries/d1').status,old.status);
+ assert.equal(h.records.get('shipments/s1/deliveries/d1').deliveredAt,old.deliveredAt);
+});
+test('store deletion removes tracking, compacts route and clears outdated estimates',async()=>{
+ const h=routeFixture();h.records.set('users/staff',{role:'STORE'});
+ await h.service.saveRoute(['d1','d2']);
+ h.records.set('tracking/t2',{routePosition:2,estimatedArrival:'old'});
+ await h.service.manageDelivery('s1','d1','delete');
+ assert.equal(h.records.has('shipments/s1/deliveries/d1'),false);
+ assert.equal(h.records.has('tracking/t1'),false);
+ assert.equal(h.records.get('tracking/t2').routePosition,1);
+ assert.equal(h.records.get('tracking/t2').estimatedArrival,null);
+ assert.equal(h.records.get('driverLocations/staff').routeEntries.length,1);
+});
+test('management rejects driver, inactive store, missing delivery and denied commit',async()=>{
+ const h=routeFixture();
+ for(const profile of [{role:'DRIVER'},{role:'STORE',active:false}]){
+ h.records.set('users/staff',profile);
+ await assert.rejects(h.service.manageDelivery('s1','d1','delete'),/Somente a loja/);
+ }
+ h.records.set('users/staff',{role:'STORE'});
+ await assert.rejects(h.service.manageDelivery('s1','missing','paid'),/não existe/);
+ h.failCommit(new Error('permission-denied'));
+ await assert.rejects(h.service.manageDelivery('s1','d1','delete'),/permission-denied/);
+ assert.equal(h.records.has('shipments/s1/deliveries/d1'),true);
+});
+test('store can remove legacy delivery without tracking or route',async()=>{
+ const h=routeFixture();h.records.set('users/staff',{role:'STORE'});
+ h.records.set('shipments/s1/deliveries/legacy',{paid:false});
+ await h.service.manageDelivery('s1','legacy','delete');
+ assert.equal(h.records.has('shipments/s1/deliveries/legacy'),false);
 });

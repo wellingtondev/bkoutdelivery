@@ -24,6 +24,8 @@
         </div>
       </section>
       <aside>
+        @if(d.status !== 'DELIVERED' && estimatedTime()){<section class="tracking-panel"><p class="panel-eyebrow">PREVISÃO DE CHEGADA</p>@if(estimateLate()){<h2>Previsão em atualização</h2><p>O horário estimado passou. Aguarde uma atualização do entregador.</p>}@else{<h2>{{estimatedTime() | date:'dd/MM · HH:mm':'-0300'}}</h2><p>Horário de Brasília. Horário estimado, sujeito a mudanças. Ao recalcular a rota, consideramos o trajeto e 3 minutos entre paradas, sem trânsito em tempo real.</p>}</section>}
+        @if(d.status !== 'DELIVERED' && d.routePosition){<section class="tracking-panel"><p class="panel-eyebrow">SUA VEZ NA ROTA</p><h2>{{d.routePosition === 1 ? "Você é a próxima parada" : d.routePosition + "ª parada"}}</h2><p>A ordem foi organizada pelo entregador e pode mudar durante o trajeto. Ela não representa um horário garantido.</p></section>}
         <section class="tracking-panel"><p class="panel-eyebrow">ETAPAS DO PEDIDO</p>
           <ol class="steps">
             <li class="done"><span>✓</span><div><b>Pedido confirmado</b><small>Recebemos seu pedido.</small></div></li>

@@ -28,17 +28,30 @@
       </article>
     }
   </div>
+  @if(actionMessage()){<p role="status">{{actionMessage()}}</p>}
   @if (activeShipment(); as shipment) {
     <section class="card list">
       <h2>Remessa {{shipment.time}} <small>· {{shipment.date | date:'dd/MM/yyyy'}}</small></h2>
       @for (d of current(); track d.id) {
         <div class="delivery">
           <div><b>{{d.customerName}}</b><small>{{d.product}} • {{d.address}}</small></div>
-          <div><b>R$ {{d.orderValue.toFixed(2)}}</b><small [class.ok]="d.paid">{{d.paid ? 'PAGO' : 'NÃO PAGO'}}</small></div>
-          <a class="mini" [routerLink]="['/track', d.trackingToken]">Tracking</a>
+          <div><b>{{d.paid ? 'Pago' : 'A cobrar: ' + (amountToCollect(d) | currency:'BRL':'symbol':'1.2-2':'pt-BR')}}</b><small [class.ok]="d.paid">{{paymentLabel(d)}}</small></div>
+          <div class="delivery-actions"><a class="mini" [routerLink]="['/track', d.trackingToken]">Tracking</a>
+            @if(!d.paid){<button type="button" class="mini" [disabled]="actionPending()" (click)="askAction(d,'paid')">Marcar como pago</button>}
+            <button type="button" class="mini danger" [disabled]="actionPending()" (click)="askAction(d,'delete')">Excluir entrega</button></div>
         </div>
       } @empty { <p class="muted">Nenhuma entrega nesta remessa. Clique em “Nova entrega” para cadastrar.</p> }
     </section>
+  }
+  @if(deliveryAction();as selection){
+    <div class="overlay"><section class="modal card" role="dialog" aria-modal="true" aria-labelledby="action-title">
+      <h2 id="action-title">{{selection.action==='paid'?'Confirmar pagamento':'Excluir entrega?'}}</h2>
+      <p><b>{{selection.delivery.customerName}}</b> · {{selection.delivery.product}}</p>
+      @if(selection.action==='paid'){<p>Confirma o pagamento do pedido e da taxa de entrega? O entregador passará a ver esta entrega como paga, sem valor a cobrar.</p>}
+      @else{<p>A entrega será removida da remessa, do histórico e dos totais. O link do cliente deixará de funcionar. Esta ação não pode ser desfeita.</p>}
+      @if(actionError()){<p role="alert" class="feedback">{{actionError()}}</p>}
+      <div class="store-actions"><button class="btn secondary" [disabled]="actionPending()" (click)="deliveryAction.set(null)">Cancelar</button><button class="btn" [disabled]="actionPending()" (click)="confirmAction()">{{actionPending()?'Processando…':selection.action==='paid'?'Confirmar como pago':'Excluir definitivamente'}}</button></div>
+    </section></div>
   }
   @if (showShipment()) {
     <div class="overlay">
@@ -72,7 +85,22 @@
           <label>Valor do pedido<input type="number" name="value" [(ngModel)]="form.orderValue" min="0" step="0.01" required></label>
           <label>Taxa de entrega<input type="number" name="fee" [(ngModel)]="form.deliveryFee" min="0" step="0.01" required></label>
         </div>
-        <label class="check"><input type="checkbox" name="paid" [(ngModel)]="form.paid"> Pedido já está pago</label>
+        <label class="check"><input type="checkbox" name="paid" [(ngModel)]="form.paid" (ngModelChange)="paymentChanged()"> Pedido e taxa de entrega já estão pagos</label>
+        @if (!form.paid) {
+          <label>Forma de pagamento<select name="paymentMethod" [(ngModel)]="form.paymentMethod" (ngModelChange)="paymentChanged()" required>
+            <option [ngValue]="undefined" disabled>Selecione a forma de pagamento</option>
+            <option value="CREDIT">Crédito</option><option value="DEBIT">Débito</option><option value="PIX">Pix</option><option value="CASH">Dinheiro</option>
+          </select></label>
+          @if (form.paymentMethod === 'CREDIT') {
+            <label>Parcelas<select name="installments" [(ngModel)]="form.installments" required>
+              <option [ngValue]="undefined" disabled>Selecione as parcelas</option>
+              <option [ngValue]="1">1x</option><option [ngValue]="2">2x</option><option [ngValue]="3">3x</option>
+            </select></label>
+          }
+          <p class="collection-total">Total a cobrar do cliente<strong>{{amountToCollect(form) | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</strong><small>Pedido + taxa de entrega</small></p>
+        }
+        <label>Observação para o entregador<textarea name="notes" [(ngModel)]="form.notes" maxlength="500" rows="3" placeholder="Ex.: chamar no portão azul, levar troco para R$ 200."></textarea></label>
+        <small class="muted">{{form.notes?.length || 0}}/500 · Visível para a loja e o entregador.</small>
         @if (error()) { <p class="feedback" role="alert">{{error()}}</p> }
         <button class="btn" [disabled]="saving() || deliveryFormRef.invalid || !destination()">{{saving() ? 'Salvando...' : 'Criar entrega e tracking'}}</button>
       </form>

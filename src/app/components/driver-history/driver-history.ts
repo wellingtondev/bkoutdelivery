@@ -1,15 +1,15 @@
 import type { Delivery, Shipment } from '../../models/models';
-import { completionDate, saoPauloDate } from '../monthly-summary/monthly-summary';
+import { cents, completionDate, saoPauloDate } from '../monthly-summary/monthly-summary';
 
 export interface DriverShipmentGroup { shipmentId: string; shipment?: Shipment; deliveries: Delivery[]; }
 export interface DriverHistoryDay { key: string; day: number; count: number; groups: DriverShipmentGroup[]; }
-export interface DriverHistory { todayCount: number; monthCount: number; missingDates: number; offset: number; days: DriverHistoryDay[]; }
+export interface DriverHistory { todayFeeCents: number; todayCount: number; monthCount: number; missingDates: number; offset: number; days: DriverHistoryDay[]; }
 
 export function driverHistory(deliveries: Delivery[], shipments: Shipment[], driverId: string, year: number, month: number, now: Date = new Date()): DriverHistory {
   const today = saoPauloDate(now);
   const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
   const result: DriverHistory = {
-    todayCount: 0, monthCount: 0, missingDates: 0,
+    todayFeeCents: 0, todayCount: 0, monthCount: 0, missingDates: 0,
     offset: new Date(Date.UTC(year, month, 1)).getUTCDay(),
     days: Array.from({ length: new Date(Date.UTC(year, month + 1, 0)).getUTCDate() }, (_, index) => ({ key: `${prefix}-${String(index + 1).padStart(2, '0')}`, day: index + 1, count: 0, groups: [] }))
   };
@@ -20,7 +20,7 @@ export function driverHistory(deliveries: Delivery[], shipments: Shipment[], dri
     const completed = completionDate(delivery.deliveredAt);
     if (!completed) { result.missingDates++; continue; }
     const date = saoPauloDate(completed);
-    if (date === today) result.todayCount++;
+    if (date === today) { result.todayCount++; result.todayFeeCents += Math.max(0, cents(delivery.deliveryFee)); }
     if (!date.startsWith(`${prefix}-`)) continue;
     const day = result.days[Number(date.slice(-2)) - 1];
     let group = day.groups.find(item => item.shipmentId === delivery.shipmentId);

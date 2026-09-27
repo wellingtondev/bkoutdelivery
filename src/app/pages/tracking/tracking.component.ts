@@ -25,6 +25,12 @@ export class TrackingComponent {
     )
   )));
   readonly delivery = computed(() => this.state()?.delivery);
+  readonly estimatedTime = computed(() => {
+    const value=this.delivery()?.estimatedArrival;
+    const time=value?new Date(value).getTime():0;
+    return Number.isFinite(time)?time:0;
+  });
+  readonly estimateLate = computed(()=>this.estimatedTime()>0 && this.estimatedTime()<this.now());
   readonly positionTime = computed(() => {
     const value = this.delivery()?.driverLocation?.updatedAt;
     if (!value) return 0;

@@ -108,3 +108,20 @@ O histórico do entregador considera apenas registros com driverId igual ao UID 
 Para GitHub, mantenha package-lock.json versionado; .gitignore exclui dependências, builds, cache, arquivos locais e credenciais privadas. A configuração Firebase web em src/environments permanece no projeto e a autorização depende das regras Firebase. Nunca adicione chave de conta de serviço.
 
 Na Vercel, selecione esta pasta como Root Directory. vercel.json define npm run build e dist/blackout-delivery/browser, com fallback das rotas Angular. A aplicação não foi publicada automaticamente. Adicione o domínio de produção aos domínios autorizados do Firebase Authentication conforme necessário.
+
+
+## Pagamento e operação do entregador
+No cadastro da entrega, pedidos pendentes exigem Pix, dinheiro, débito ou crédito em 1x/2x/3x. O total a cobrar soma pedido e taxa. Marcar pago significa que pedido e taxa já estão pagos. Observações de até 500 caracteres ficam disponíveis somente para a equipe.
+O entregador agrupa as entregas por remessa, expande/recolhe detalhes e mantém cobrança e forma de pagamento em destaque. O resumo mostra taxas das próprias entregas concluídas hoje em Brasília, sem afirmar repasse financeiro.
+Cheguei prepara uma mensagem no WhatsApp do telefone brasileiro cadastrado; o entregador confirma o envio no WhatsApp. Não há envio automático nem comprovação de que a mensagem foi enviada. Referência: https://faq.whatsapp.com/5913398998672934.
+
+A ordem da rota é pessoal e pode atravessar remessas. Use setas e Salvar ordem da rota; isso vincula as entregas selecionadas ao entregador. O link recebe apenas sua posição, atualizada ao concluir paradas. A previsão agora é automática ao salvar a rota: partida naquele momento da Rua Cândida Mendonça Bilharinho, 621, Mercês, Uberaba/MG, trajeto rodoviário na sequência escolhida e 3 minutos entre paradas. Cliente vê horário de Brasília. Sem trânsito em tempo real; previsão vencida pede atualização. Recalcular no meio do trajeto ainda considera a saída fixa, não o GPS atual. O manifesto privado usa driverLocations/{uid}, já autorizado para o próprio DRIVER nas regras do projeto.
+
+## Cálculo automático de chegada
+A origem configurada (-19.7424531,-47.9483885) foi localizada na ficha pública do número621 (Residencial Parque Umuarama): https://www.waze.com/live-map/directions/br/mg/condominio-residencial-parque-umuarama?to=place.ChIJU_uu5LDRupQR_Jab_0EO6KM. O cálculo usa os pontos marcados nos endereços das entregas e preserva sua ordem.
+Serviço OSRM/FOSSGIS, perfil rodoviário de carro (aproximação para entregas): https://routing.openstreetmap.de/about.html. Uso moderado e no máximo uma requisição por segundo no cliente, sem polling automático; até99paradas. Envia somente coordenadas, sem nomes/telefones/notas. Horários sem garantia de trânsito ou disponibilidade do serviço. Se houver erro ou destino ausente, salva ordem e limpa horários; timeout/cancelamento mantém estado anterior com aviso. Destino alterado durante consulta exige recalcular.
+Verificação: teste real no navegador até Praça Rui Barbosa, origem e duas paradas; sem gravações Firebase.
+
+## Gerenciar entregas pela loja
+Na lista da remessa, Marcar como pago confirma pedido e taxa pagos; a atualização privada/pública é transacional e aparece nos listeners do entregador. Não altera status nem data de conclusão. Excluir entrega exige confirmação e remove entrega/tracking permanentemente, inclusive dos totais históricos. Remove a parada da rota, compacta posições e limpa estimativas restantes para recalcular.
+Publique novamente firestore.rules antes de excluir entregas vinculadas a rotas: STORE pode atualizar somente routeEntries do manifesto existente. Regras não são publicadas automaticamente. Validação local: 69 testes, build e navegador (pagamento e cancelamento da exclusão) com dados fictícios; nenhuma exclusão real realizada.
