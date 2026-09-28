@@ -1,4 +1,7 @@
-import { Component, OnDestroy, computed, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, signal } from '@angular/core';
+import { DeliveryZonesService } from '../../core/delivery-zones.service';
+import { DeliveryZones, deliveryFeeForPoint } from '../../core/delivery-zones';
+import { DeliveryZonesEditorComponent } from '../../components/delivery-zones-editor/delivery-zones-editor.component';
 import { recurringShipments, deliveryDay, saoPauloDay } from '../../core/shipment-calendar';
 import { searchUberaba } from '../../core/address-search';
 import { CommonModule } from '@angular/common';
@@ -13,7 +16,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
 
 @Component({
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent],
   templateUrl: './store.component.html',
   styles: [`
     .delivery-actions{display:flex;gap:8px;flex-wrap:wrap}.danger{color:#ff8b83}.delivery{flex-wrap:wrap}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
@@ -26,6 +29,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
     .modal textarea{resize:vertical;min-height:90px;background:#09090b;border:1px solid #3f3f46;border-radius:10px;color:#fafafa;padding:12px;font:inherit}
     .collection-total{padding:14px;border:1px solid #ff5147;border-radius:12px;background:#ff514710}.collection-total strong{display:block;font-size:1.4rem;margin-top:4px}
     .modal .check input{width:auto}
+    .zone-summary{margin:0 0 24px;line-height:1.6}.zone-summary p{margin:6px 0}.fee-note{line-height:1.5}.fee-note strong{color:#fafafa}.modal input[readonly]{background:#232327;color:#fff;border-color:#565662}
     @media(max-width:760px){.store-actions{width:100%}}
   `]
 })
@@ -69,7 +73,48 @@ export class StoreComponent implements OnDestroy {
   shipmentForm = { date: this.today(), time: '' };
   destination = signal<{lat:number;lng:number} | null>(null);
 
-  constructor(public svc: DeliveryService, public auth: AuthService) {}
+  readonly showZones = signal(false);
+  readonly savingZones = signal(false);
+  readonly zonesSaveError = signal('');
+  readonly zonesMessage = signal('');
+  readonly feeQuote = computed(() => {
+    const point = this.destination();
+    const zones = this.zonesService.config();
+    return point && zones ? deliveryFeeForPoint(point, zones) : null;
+  });
+  readonly feeReady = computed(() => !this.zonesService.loading() && !this.zonesService.error()
+    && (!this.zonesService.config() || !!this.feeQuote()));
+  readonly feeZoneLabel = computed(() => {
+    switch (this.feeQuote()?.zone) {
+      case 'GREEN': return 'Zona verde';
+      case 'YELLOW': return 'Zona amarela';
+      case 'OUTSIDE': return 'Fora da zona amarela';
+      default: return 'Marque o destino para calcular';
+    }
+  });
+
+  constructor(public svc: DeliveryService, public auth: AuthService, public zonesService: DeliveryZonesService) {
+    effect(() => this.refreshDeliveryFee());
+  }
+
+  refreshDeliveryFee(): void {
+    if (this.zonesService.loading() || this.zonesService.error()) this.form.deliveryFee = 0;
+    else if (this.zonesService.config()) this.form.deliveryFee = this.feeQuote()?.fee ?? 0;
+  }
+
+  openZones(): void { this.zonesSaveError.set(''); this.zonesMessage.set(''); this.showZones.set(true); }
+  async saveZones(zones: DeliveryZones): Promise<void> {
+    if (this.savingZones()) return;
+    this.savingZones.set(true); this.zonesSaveError.set('');
+    try {
+      await this.zonesService.save(zones);
+      this.showZones.set(false);
+      this.zonesMessage.set('Zonas salvas. As novas entregas terão a taxa calculada pelo destino.');
+      this.refreshDeliveryFee();
+    } catch (error) {
+      this.zonesSaveError.set(error instanceof Error ? error.message : 'Não foi possível salvar as zonas.');
+    } finally { this.savingZones.set(false); }
+  }
 
   selectDestination(point: {lat:number;lng:number}): void {
     this.cancelAddressSearch();
@@ -77,6 +122,7 @@ export class StoreComponent implements OnDestroy {
     this.destination.set(point);
     this.form.lat = point.lat;
     this.form.lng = point.lng;
+    this.refreshDeliveryFee();
   }
 
   addressChanged(): void {
@@ -84,6 +130,7 @@ export class StoreComponent implements OnDestroy {
     this.destination.set(null);
     this.form.lat = undefined;
     this.form.lng = undefined;
+    this.refreshDeliveryFee();
     const address = this.form.address.trim();
     this.addressStatus.set(address.length < 6 ? 'Digite a rua e o número em Uberaba.' : 'Buscando endereço em Uberaba…');
     if (address.length < 6) return;
@@ -98,6 +145,7 @@ export class StoreComponent implements OnDestroy {
         if (result) {
           this.destination.set({ lat: result.lat, lng: result.lng });
           this.form.lat = result.lat; this.form.lng = result.lng;
+          this.refreshDeliveryFee();
           this.addressStatus.set(`Local encontrado: ${result.label}. Confira a entrada e ajuste o marcador: a posição pode ser aproximada.`);
         } else this.addressStatus.set('Endereço não encontrado em Uberaba. Marque a entrada no mapa.');
       } catch {
@@ -172,6 +220,13 @@ export class StoreComponent implements OnDestroy {
 
   async save(): Promise<void> {
     if (this.saving()) return;
+    this.refreshDeliveryFee();
+    if (!this.feeReady()) {
+      this.error.set(this.zonesService.error()
+        ? 'Não foi possível verificar as zonas de entrega. Confira as permissões do Firestore e recarregue a página.'
+        : this.zonesService.loading() ? 'Aguarde o carregamento das zonas de entrega.' : 'Confirme o destino no mapa para calcular a taxa pelas zonas.');
+      return;
+    }
     this.saving.set(true);
     this.error.set('');
     const delivery = { ...this.form };

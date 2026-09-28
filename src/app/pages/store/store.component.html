@@ -3,10 +3,21 @@
   <div class="hero">
     <div><p class="eyebrow">PAINEL DA LOJA</p><h1>Remessas e entregas</h1><p class="muted">Organize as remessas e acompanhe o andamento.</p></div>
     <div class="store-actions">
+      <button type="button" class="btn secondary fit" [disabled]="zonesService.loading()" (click)="openZones()">Zonas de entrega</button>
       <button class="btn secondary fit" (click)="openShipment()">+ Novo horário</button>
       <button class="btn fit" [disabled]="svc.loading() || !svc.shipments().length" (click)="open()">+ Nova entrega</button>
     </div>
   </div>
+  <section class="zone-summary" aria-label="Taxas por zona">
+    @if(zonesService.loading()){<p class="muted" role="status">Carregando zonas de entrega…</p>}
+    @else if(zonesService.error()){<p class="feedback" role="alert">{{zonesService.error()}}</p>}
+    @else if(zonesService.config()){<p class="muted">Taxa automática: <strong>verde R$ 10,00</strong> · <strong>amarela R$ 12,00</strong> · <strong>fora da amarela R$ 15,00</strong>.</p>}
+    @else{<p class="muted">Desenhe suas zonas em “Zonas de entrega” para ativar as taxas automáticas. Até lá, informe a taxa manualmente.</p>}
+    @if(zonesMessage()){<p role="status">{{zonesMessage()}}</p>}
+  </section>
+  @if(showZones()){
+    <app-delivery-zones-editor [zones]="zonesService.config()" [saving]="savingZones()" [error]="zonesSaveError()" (saveZones)="saveZones($event)" (closed)="showZones.set(false)"></app-delivery-zones-editor>
+  }
   @if(!svc.loading() && !svc.error()) { <app-monthly-summary [deliveries]="svc.deliveries()" [selectedDate]="selectedDate()" [deliveryCounts]="deliveryCounts()" (dateSelected)="selectDate($event)"></app-monthly-summary> }
   @if (svc.error()) { <p class="feedback" role="alert">{{svc.error()}}</p> }
   @if (svc.loading()) {
@@ -78,14 +89,16 @@
         <label>Endereço completo<input name="address" [(ngModel)]="form.address" (ngModelChange)="addressChanged()" placeholder="Rua, número e bairro — Uberaba/MG" required></label>
         <p class="muted">Ao digitar, buscamos o endereço em Uberaba. Confira a entrada no mapa antes de salvar.</p>
         <p class="muted" role="status">{{addressStatus()}}</p>
-        <app-delivery-map [selectable]="true" [destination]="destination()" (destinationChange)="selectDestination($event)"></app-delivery-map>
+        <app-delivery-map [selectable]="true" [destination]="destination()" [zones]="zonesService.config()" (destinationChange)="selectDestination($event)"></app-delivery-map>
         @if(destination(); as point){<p class="muted" role="status">Destino selecionado: {{point.lat | number:'1.5-5'}}, {{point.lng | number:'1.5-5'}}</p>}
         @else{<p class="muted">Selecione o destino no mapa para continuar.</p>}
         <label>Produto / pedido<input name="product" [(ngModel)]="form.product" required></label>
         <div class="two">
           <label>Valor do pedido<input type="number" name="value" [(ngModel)]="form.orderValue" min="0" step="0.01" required></label>
-          <label>Taxa de entrega<input type="number" name="fee" [(ngModel)]="form.deliveryFee" min="0" step="0.01" required></label>
+          <label>Taxa de entrega<input type="number" name="fee" [(ngModel)]="form.deliveryFee" [readonly]="!!zonesService.config() || zonesService.loading() || !!zonesService.error()" min="0" step="0.01" required></label>
         </div>
+        @if(zonesService.config()){<p class="fee-note" role="status"><strong>{{feeZoneLabel()}}</strong> · A taxa acompanha o destino no mapa. Confira a posição antes de salvar.</p>}
+        @if(zonesService.error()){<p class="feedback" role="alert">{{zonesService.error()}}</p>}
         <label class="check"><input type="checkbox" name="paid" [(ngModel)]="form.paid" (ngModelChange)="paymentChanged()"> Pedido e taxa de entrega já estão pagos</label>
         @if (!form.paid) {
           <label>Forma de pagamento<select name="paymentMethod" [(ngModel)]="form.paymentMethod" (ngModelChange)="paymentChanged()" required>
@@ -103,7 +116,7 @@
         <label>Observação para o entregador<textarea name="notes" [(ngModel)]="form.notes" maxlength="500" rows="3" placeholder="Ex.: chamar no portão azul, levar troco para R$ 200."></textarea></label>
         <small class="muted">{{form.notes?.length || 0}}/500 · Visível para a loja e o entregador.</small>
         @if (error()) { <p class="feedback" role="alert">{{error()}}</p> }
-        <button class="btn" [disabled]="saving() || deliveryFormRef.invalid || !destination()">{{saving() ? 'Salvando...' : 'Criar entrega e tracking'}}</button>
+        <button class="btn" [disabled]="saving() || deliveryFormRef.invalid || !destination() || !feeReady()">{{saving() ? 'Salvando...' : 'Criar entrega e tracking'}}</button>
       </form>
     </div>
   }

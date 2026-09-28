@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
+const zones = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/delivery-zones.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: zones });
 const calendar = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/shipment-calendar.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: calendar, Date });
 const route = {};
@@ -20,6 +22,7 @@ function setup() {
   let authCallback;
   let authStopped = false;
   let commitError;
+  let readError;
   const authState = { currentUser: null };
   let id = 0;
   const signal = initial => {
@@ -35,6 +38,7 @@ function setup() {
     return { path: refPath, id: refPath.split('/').at(-1) };
   };
   const firestore = {
+    getDoc: async ref => { if(readError)throw readError; return {exists:()=>records.has(ref.path),data:()=>records.get(ref.path)}; },
     runTransaction: async (_db, callback) => {
       const batch = { writes: [], committed: false };
       batches.push(batch);
@@ -78,7 +82,7 @@ function setup() {
     'firebase/firestore': firestore,
     'rxjs': require('rxjs'),
     './firebase': { auth: authState, db: {} },
-    './shipment-calendar': calendar, './payment': payment, './delivery-route': route
+    './delivery-zones': zones, './shipment-calendar': calendar, './payment': payment, './delivery-route': route
   };
   const source = fs.readFileSync(path.join(__dirname, '../src/app/core/delivery.service.ts'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
@@ -94,6 +98,7 @@ function setup() {
     signIn: user => { authState.currentUser = user; authCallback(user); },
     get authStopped() { return authStopped; },
     failCommit: error => { commitError = error; },
+    failRead: error => { readError = error; },
     emitCollection: (refPath, rows) => {
       rows.forEach(row => records.set(refPath + '/' + row.id, row));
       active(refPath).next({ docs: rows.map(row => ({ id: row.id, data: () => row })) });
@@ -103,6 +108,23 @@ function setup() {
 }
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
+
+test('zones creation recalculates configured fee and blocks invalid settings instead of fallback',async()=>{
+ const h=setup(), square=(a,b)=>[{lat:a,lng:a},{lat:a,lng:b},{lat:b,lng:b},{lat:b,lng:a}];
+ h.records.set('settings/deliveryZones',{schemaVersion:1,green:square(1,2),yellow:square(0,3)});
+ for(const [lat,expected] of [[1.5,10],[2.5,12],[4,15]]){
+ await h.service.createDelivery('s1',{...order,lat,lng:lat,deliveryFee:999});
+ assert.equal(h.batches.at(-1).writes[0].data.deliveryFee,expected);
+ }
+ h.records.set('settings/deliveryZones',{schemaVersion:2});
+ await assert.rejects(h.service.createDelivery('s1',order),/zonas/i);assert.equal(h.batches.length,3);
+});
+
+test('zones read failure blocks delivery creation without manual fallback',async()=>{
+ const h=setup();h.failRead(new Error('permission-denied'));
+ await assert.rejects(h.service.createDelivery('s1',order),/permission-denied/);
+ assert.equal(h.batches.length,0);
+});
 
 test('billing and notes persist privately; paid orders omit stale billing', async () => {
   for (const paid of [false, true]) {

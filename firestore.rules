@@ -7,6 +7,17 @@ service cloud.firestore {
     function role(r){ return active() && me().data.get('role', '') == r; }
     function staff(){ return role('STORE') || role('DRIVER'); }
 
+    match /settings/deliveryZones {
+      allow get: if role('STORE');
+      allow list, delete: if false;
+      allow create, update: if role('STORE')
+        && request.resource.data.keys().hasOnly(['schemaVersion', 'green', 'yellow'])
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.green is list && request.resource.data.yellow is list
+        && request.resource.data.green.size() >= 3 && request.resource.data.green.size() <= 80
+        && request.resource.data.yellow.size() >= 3 && request.resource.data.yellow.size() <= 80;
+    }
+
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || role('STORE'));
       allow create, update, delete: if role('STORE');

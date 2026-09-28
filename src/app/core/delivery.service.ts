@@ -1,12 +1,13 @@
 import { Injectable, OnDestroy, signal } from '@angular/core';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, doc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Observable, Subscription } from 'rxjs';
 import { Delivery, NewDelivery, PublicTracking, Shipment } from '../models/models';
 import { auth, db } from './firebase';
 import { normalizePayment } from './payment';
 import { routeEntries, routeEntry, routeKey } from './delivery-route';
 import { recurringShipments, saoPauloDay, validDeliveryDate } from './shipment-calendar';
+import { DeliveryZones, deliveryFeeForPoint } from './delivery-zones';
 
 @Injectable({ providedIn: 'root' })
 export class DeliveryService implements OnDestroy {
@@ -107,6 +108,11 @@ export class DeliveryService implements OnDestroy {
     const payment = normalizePayment(delivery);
     const deliveryDate = delivery.deliveryDate === undefined ? saoPauloDay() : delivery.deliveryDate;
     if (!validDeliveryDate(deliveryDate)) throw new Error('Informe uma data válida para a entrega.');
+    const creatingUid = auth.currentUser?.uid;
+    const zoneSettings = await getDoc(doc(db, 'settings', 'deliveryZones'));
+    if (auth.currentUser?.uid !== creatingUid) throw new Error('A sessão mudou. Entre novamente antes de cadastrar a entrega.');
+    const quote = zoneSettings.exists() ? deliveryFeeForPoint({ lat: delivery.lat!, lng: delivery.lng! }, zoneSettings.data() as DeliveryZones) : null;
+    if (zoneSettings.exists() && !quote) throw new Error('As zonas de entrega estão inválidas. Corrija a configuração antes de cadastrar.');
     const deliveryRef = doc(collection(db, 'shipments', shipmentId, 'deliveries'));
     const trackingCode = crypto.randomUUID();
     const batch = writeBatch(db);
@@ -114,7 +120,8 @@ export class DeliveryService implements OnDestroy {
       shipmentId, deliveryDate, trackingCode, trackingToken: trackingCode,
       customerName: delivery.customerName, phone: delivery.phone, address: delivery.address,
       lat: delivery.lat, lng: delivery.lng,
-      product: delivery.product, orderValue: delivery.orderValue, deliveryFee: delivery.deliveryFee,
+      product: delivery.product, orderValue: delivery.orderValue, deliveryFee: quote?.fee ?? delivery.deliveryFee,
+      ...(quote ? { feeZone: quote.zone } : {}),
       paid: delivery.paid, ...payment, status: 'WAITING', createdAt: serverTimestamp()
     });
     batch.set(doc(db, 'tracking', trackingCode), {

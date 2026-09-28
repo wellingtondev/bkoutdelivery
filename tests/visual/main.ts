@@ -4,6 +4,8 @@ import localePt from '@angular/common/locales/pt';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideRouter, RouterLink, RouterOutlet } from '@angular/router';
 import { of } from 'rxjs';
+import { DeliveryZonesService } from '../../src/app/core/delivery-zones.service';
+import { DeliveryZones, validateDeliveryZones, deliveryFeeForPoint } from '../../src/app/core/delivery-zones';
 import { DeliveryService } from '../../src/app/core/delivery.service';
 import { AuthService } from '../../src/app/core/auth.service';
 import { StoreComponent } from '../../src/app/pages/store/store.component';
@@ -29,6 +31,10 @@ const deliveries = signal<Delivery[]>([
   { ...base, id: 'fixture-3', customerName: 'Diego · demonstração', paid: false },
 ]);
 const shipments = signal<Shipment[]>([{ id: 'fixture-shipment', date: today, time: '18:00', status: 'WAITING' },{id:'old-same-time',date:'2026-09-26',time:'18:00',status:'WAITING'}]);
+const previewZones = {
+  config: signal<DeliveryZones|null>(null), loading: signal(false), error: signal(''),
+  async save(zones:DeliveryZones){const error=validateDeliveryZones(zones);if(error)throw new Error(error);this.config.set(structuredClone(zones));}
+};
 const service = {
   shipments, deliveries, error: signal(''), loading: signal(false),
   async createShipment(shipment: Pick<Shipment, 'date' | 'time'>): Promise<string> {
@@ -39,7 +45,8 @@ const service = {
   async manageDelivery(shipmentId:string,id:string,action:'paid'|'delete'){ deliveries.update(items=>action==='delete'?items.filter(d=>d.id!==id):items.map(d=>d.id===id?{...d,paid:true}:d)); },
   async add(delivery: NewDelivery): Promise<string> {
     const id = `fixture-${crypto.randomUUID()}`;
-    deliveries.update(items => [...items, { ...delivery, id, trackingToken: 'demo', status: 'WAITING' }]);
+    const zones=previewZones.config();const quote=zones?deliveryFeeForPoint({lat:delivery.lat!,lng:delivery.lng!},zones):null;
+    deliveries.update(items => [...items, { ...delivery, ...(quote?{deliveryFee:quote.fee,feeZone:quote.zone}:{}), id, trackingToken: 'demo', status: 'WAITING' }]);
     return id;
   },
   byToken(_token: string) {
@@ -79,6 +86,7 @@ bootstrapApplication(VisualPreviewComponent, {
   providers: [
     { provide: LOCALE_ID, useValue: 'pt-BR' },
     { provide: DeliveryService, useValue: service },
+    { provide: DeliveryZonesService, useValue: previewZones },
     { provide: AuthService, useValue: { user:{uid:'fixture-driver'}, logout: async () => undefined } },
     { provide: LocationService, useValue: previewLocation },
     provideRouter([

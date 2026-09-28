@@ -1,5 +1,6 @@
 import { AfterViewInit, Component, ElementRef, EventEmitter, Input, NgZone, OnChanges, OnDestroy, Output, ViewChild, signal } from '@angular/core';
 import * as L from 'leaflet';
+import { DeliveryZones, validateDeliveryZones } from '../../core/delivery-zones';
 
 type Point = { lat: number; lng: number };
 
@@ -13,6 +14,7 @@ export class DeliveryMapComponent implements AfterViewInit, OnChanges, OnDestroy
   @Input() destination: Point | null = null;
   @Input() driverPosition: Point | null = null;
   @Input() selectable = false;
+  @Input() zones: DeliveryZones | null = null;
   @Output() destinationChange = new EventEmitter<Point>();
   @ViewChild('canvas', { static: true }) canvas!: ElementRef<HTMLDivElement>;
 
@@ -20,6 +22,7 @@ export class DeliveryMapComponent implements AfterViewInit, OnChanges, OnDestroy
   readonly locating = signal(false);
   readonly locationMessage = signal('');
   private map?: L.Map;
+  private zoneLayers?: L.LayerGroup;
   private destinationMarker?: L.Marker;
   private driverMarker?: L.Marker;
   private resizeObserver?: ResizeObserver;
@@ -32,6 +35,8 @@ export class DeliveryMapComponent implements AfterViewInit, OnChanges, OnDestroy
   ngAfterViewInit(): void {
     this.zone.runOutsideAngular(() => {
       this.map = L.map(this.canvas.nativeElement, { scrollWheelZoom: false }).setView([-19.747, -47.939], 13);
+      this.zoneLayers = L.layerGroup().addTo(this.map);
+      this.syncZones();
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
@@ -50,7 +55,16 @@ export class DeliveryMapComponent implements AfterViewInit, OnChanges, OnDestroy
     });
   }
 
-  ngOnChanges(): void { this.syncMarkers(); }
+  ngOnChanges(): void { this.syncMarkers(); this.syncZones(); }
+
+  private syncZones(): void {
+    if (!this.zoneLayers) return;
+    this.zoneLayers.clearLayers();
+    if (!this.zones || validateDeliveryZones(this.zones)) return;
+    for (const name of ['yellow', 'green'] as const) {
+      L.polygon(this.zones[name], { color: name === 'green' ? '#23c879' : '#efbf35', weight: 2, fillOpacity: .18, interactive: false }).addTo(this.zoneLayers);
+    }
+  }
 
   selectCenter(): void {
     if (this.map && this.selectable) this.select(this.map.getCenter().wrap());
@@ -88,6 +102,7 @@ export class DeliveryMapComponent implements AfterViewInit, OnChanges, OnDestroy
     this.resizeObserver?.disconnect();
     this.destinationMarker?.off();
     this.driverMarker?.off();
+    this.zoneLayers?.clearLayers();
     this.map?.off();
     this.map?.remove();
     this.map = undefined;

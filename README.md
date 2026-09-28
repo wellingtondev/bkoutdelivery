@@ -135,3 +135,11 @@ Novas entregas salvam `deliveryDate`. Para registros antigos, o dia é obtido de
 Para habilitar a exclusão em produção, copie o conteúdo completo de `firestore.rules` em **Firebase Console → Firestore Database → Regras** e clique em **Publicar**. O perfil em `users/{UID}` deve ter `role: "STORE"` e não pode ter `active: false`. As regras permitem à loja excluir a entrega e seu tracking e retirar a parada do manifesto. O campo `active` ausente é aceito, conforme o login. `firebase.json` também aponta para esse arquivo para publicação por CLI autenticada. Compilar ou publicar o aplicativo na Vercel não publica as regras Firebase.
 
 Validação desta mudança: 80 testes offline, build de produção e navegação com dados fictícios. Regras remotas não publicadas nem testadas neste ambiente.
+
+## Taxa automática por zonas
+
+Na loja, abra **Zonas de entrega**. Desenhe o contorno verde (R$ 10) e o contorno amarelo externo (R$ 12), envolvendo toda a área verde, e salve. Use pontos ao redor do perímetro, sem cruzar as linhas. Fora do amarelo, a taxa é R$ 15. As bordas pertencem à zona desenhada; na borda verde prevalece R$ 10. Nenhum limite da imagem foi presumido: os contornos reais são definidos pela loja.
+
+O destino encontrado ao digitar o endereço, ou ajustado manualmente no mapa, determina a taxa. A taxa fica automática depois de configurar as zonas e é revalidada no cadastro. Sem configuração, permanece o valor manual. Erro ao ler a configuração bloqueia a criação para evitar cobrança incorreta. Atualizar as zonas não altera valores históricos.
+
+A configuração compartilhada fica em settings/deliveryZones, com acesso apenas STORE. **Publique novamente firestore.rules antes de usar esta versão**, pois as novas permissões de configuração não são publicadas pela Vercel. As mesmas zonas serão carregadas nas outras sessões da loja. Sem autenticação Firebase local, o deploy das regras continua a cargo da loja.
