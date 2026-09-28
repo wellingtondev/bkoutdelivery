@@ -1,11 +1,12 @@
 import { Injectable, OnDestroy, signal } from '@angular/core';
 import { onAuthStateChanged } from 'firebase/auth';
-import { addDoc, collection, doc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, doc, onSnapshot, runTransaction, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Observable, Subscription } from 'rxjs';
 import { Delivery, NewDelivery, PublicTracking, Shipment } from '../models/models';
 import { auth, db } from './firebase';
 import { normalizePayment } from './payment';
 import { routeEntries, routeEntry, routeKey } from './delivery-route';
+import { recurringShipments, saoPauloDay, validDeliveryDate } from './shipment-calendar';
 
 @Injectable({ providedIn: 'root' })
 export class DeliveryService implements OnDestroy {
@@ -84,12 +85,18 @@ export class DeliveryService implements OnDestroy {
 
   async createShipment(shipment: Pick<Shipment, 'date' | 'time'>): Promise<string> {
     const { date, time } = shipment;
-    const parsedDate = new Date(`${date}T12:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    if (!validDeliveryDate(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
       throw new Error('Informe uma data e um horário válidos para a remessa.');
     }
-    const result = await addDoc(collection(db, 'shipments'), { date, time, status: 'WAITING', createdAt: serverTimestamp() });
-    return result.id;
+    const existing = recurringShipments(this.shipments()).find(item => item.time === time);
+    if (existing) return existing.id;
+    const ref = doc(db, 'shipments', `slot-${time.replace(':', '')}`);
+    await runTransaction(db, async transaction => {
+      const current = await transaction.get(ref);
+      if (!current.exists()) transaction.set(ref, { date, time, status: 'WAITING', createdAt: serverTimestamp() });
+      else if (current.data()['time'] !== time) throw new Error('O identificador deste horário já está em uso.');
+    });
+    return ref.id;
   }
 
   async createDelivery(shipmentId: string, delivery: NewDelivery | Delivery): Promise<string> {
@@ -98,11 +105,13 @@ export class DeliveryService implements OnDestroy {
       throw new Error('Informe o endereço e confirme o destino no mapa.');
     }
     const payment = normalizePayment(delivery);
+    const deliveryDate = delivery.deliveryDate === undefined ? saoPauloDay() : delivery.deliveryDate;
+    if (!validDeliveryDate(deliveryDate)) throw new Error('Informe uma data válida para a entrega.');
     const deliveryRef = doc(collection(db, 'shipments', shipmentId, 'deliveries'));
     const trackingCode = crypto.randomUUID();
     const batch = writeBatch(db);
     batch.set(deliveryRef, {
-      shipmentId, trackingCode, trackingToken: trackingCode,
+      shipmentId, deliveryDate, trackingCode, trackingToken: trackingCode,
       customerName: delivery.customerName, phone: delivery.phone, address: delivery.address,
       lat: delivery.lat, lng: delivery.lng,
       product: delivery.product, orderValue: delivery.orderValue, deliveryFee: delivery.deliveryFee,

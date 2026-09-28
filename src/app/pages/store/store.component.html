@@ -3,26 +3,26 @@
   <div class="hero">
     <div><p class="eyebrow">PAINEL DA LOJA</p><h1>Remessas e entregas</h1><p class="muted">Organize as remessas e acompanhe o andamento.</p></div>
     <div class="store-actions">
-      <button class="btn secondary fit" (click)="openShipment()">+ Nova remessa</button>
+      <button class="btn secondary fit" (click)="openShipment()">+ Novo horário</button>
       <button class="btn fit" [disabled]="svc.loading() || !svc.shipments().length" (click)="open()">+ Nova entrega</button>
     </div>
   </div>
-  @if(!svc.loading() && !svc.error()) { <app-monthly-summary [deliveries]="svc.deliveries()"></app-monthly-summary> }
+  @if(!svc.loading() && !svc.error()) { <app-monthly-summary [deliveries]="svc.deliveries()" [selectedDate]="selectedDate()" [deliveryCounts]="deliveryCounts()" (dateSelected)="selectDate($event)"></app-monthly-summary> }
   @if (svc.error()) { <p class="feedback" role="alert">{{svc.error()}}</p> }
   @if (svc.loading()) {
     <p class="muted" role="status">Carregando remessas...</p>
   } @else if (!svc.shipments().length && !svc.error()) {
     <section class="card empty-state">
       <h2>Nenhuma remessa cadastrada</h2>
-      <p class="muted">Crie uma remessa com data e horário para começar a cadastrar as entregas.</p>
+      <p class="muted">Cadastre um horário fixo para começar. Ele será reutilizado nos próximos dias.</p>
       <button class="btn fit" (click)="openShipment()">Criar primeira remessa</button>
     </section>
   }
   <div class="grid">
-    @for (s of svc.shipments(); track s.id) {
+    @for (s of shipmentSlots(); track s.id) {
       <article class="card shipment" [class.selected]="activeShipment()?.id === s.id">
-        <p class="shipment-date">{{s.date | date:'dd/MM/yyyy'}}</p>
-        <div class="time">{{s.time}}</div><span class="pill">{{s.status}}</span>
+        <p class="shipment-date">{{selectedDate() | date:'dd/MM/yyyy'}}</p>
+        <div class="time">{{s.time}}</div><span class="pill">Diária</span>
         <h3>{{count(s.id)}} entregas</h3><p class="muted">{{delivered(s.id)}} concluídas</p>
         <button class="link" (click)="selected.set(s.id)">Ver remessa →</button>
       </article>
@@ -31,8 +31,8 @@
   @if(actionMessage()){<p role="status">{{actionMessage()}}</p>}
   @if (activeShipment(); as shipment) {
     <section class="card list">
-      <h2>Remessa {{shipment.time}} <small>· {{shipment.date | date:'dd/MM/yyyy'}}</small></h2>
-      @for (d of current(); track d.id) {
+      <h2>Remessa {{shipment.time}} <small>· {{selectedDate() | date:'dd/MM/yyyy'}}</small></h2>
+      @for (d of current(); track d.shipmentId + '/' + d.id) {
         <div class="delivery">
           <div><b>{{d.customerName}}</b><small>{{d.product}} • {{d.address}}</small></div>
           <div><b>{{d.paid ? 'Pago' : 'A cobrar: ' + (amountToCollect(d) | currency:'BRL':'symbol':'1.2-2':'pt-BR')}}</b><small [class.ok]="d.paid">{{paymentLabel(d)}}</small></div>
@@ -56,10 +56,10 @@
   @if (showShipment()) {
     <div class="overlay">
       <form class="modal card" role="dialog" aria-modal="true" aria-labelledby="shipment-title" #shipmentFormRef="ngForm" (ngSubmit)="shipmentFormRef.valid && saveShipment()">
-        <div class="row"><h2 id="shipment-title">Nova remessa</h2><button type="button" class="x" aria-label="Fechar cadastro de remessa" [disabled]="savingShipment()" (click)="showShipment.set(false)">×</button></div>
-        <p class="muted">Defina a data e o horário de saída das entregas.</p>
+        <div class="row"><h2 id="shipment-title">Novo horário de remessa</h2><button type="button" class="x" aria-label="Fechar cadastro de remessa" [disabled]="savingShipment()" (click)="showShipment.set(false)">×</button></div>
+        <p class="muted">Cadastre um horário fixo, reutilizado todos os dias. Horários existentes não serão duplicados.</p>
         <div class="two">
-          <label>Data<input type="date" name="date" [(ngModel)]="shipmentForm.date" required [disabled]="savingShipment()"></label>
+          
           <label>Horário<input type="time" name="time" [(ngModel)]="shipmentForm.time" required [disabled]="savingShipment()"></label>
         </div>
         @if (shipmentError()) { <p class="feedback" role="alert">{{shipmentError()}}</p> }
@@ -71,7 +71,8 @@
     <div class="overlay">
       <form class="modal card" role="dialog" aria-modal="true" aria-labelledby="delivery-title" #deliveryFormRef="ngForm" (ngSubmit)="deliveryFormRef.valid && save()">
         <div class="row"><h2 id="delivery-title">Nova entrega</h2><button type="button" class="x" aria-label="Fechar cadastro de entrega" [disabled]="saving()" (click)="closeDelivery()">×</button></div>
-        <label>Remessa<select name="ship" [(ngModel)]="form.shipmentId" required>@for(s of svc.shipments(); track s.id){<option [value]="s.id">{{s.date | date:'dd/MM/yyyy'}} · {{s.time}}</option>}</select></label>
+        <label>Remessa<select name="ship" [(ngModel)]="form.shipmentId" required>@for(s of shipmentSlots(); track s.id){<option [value]="s.id">{{s.time}} · diária</option>}</select></label>
+        <p class="muted">Dia da entrega: {{form.deliveryDate | date:'dd/MM/yyyy'}}. Selecione outro dia no calendário antes de cadastrar.</p>
         <label>Nome do cliente<input name="name" [(ngModel)]="form.customerName" required></label>
         <label>Telefone<input name="phone" [(ngModel)]="form.phone" required></label>
         <label>Endereço completo<input name="address" [(ngModel)]="form.address" (ngModelChange)="addressChanged()" placeholder="Rua, número e bairro — Uberaba/MG" required></label>

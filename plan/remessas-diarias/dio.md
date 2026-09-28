@@ -1,0 +1,26 @@
+# Revalidação AS-IS — remessas diárias
+
+Artefato `dio-remessas-diarias`, ciclo `remessas-diarias-20260928`, produtor DIO 1.0.1, fonte canônica verificada `C:/Users/Pc Gamer/.codex/skills/dio/SKILL.md`. Data lógica 28/09/2026. Modo incremental; status current; resultado partial local. Contratos graph e referências DIO lidos nesta sessão e reutilizados. Projeto: Blackout Delivery, em `H:/blackout-delivery/blackout-delivery-angular/blackout-delivery`. Vault não informado; nenhuma publicação ou alteração remota.
+
+## Fontes e confronto
+
+Solicitação esperada: `sim.md` e `remessas-diarias.md`; entrega reportada: `domain.md`, `review.md`, `validation.md`. Reanálise direta dos arquivos de domínio, cadastro, calendário, entregador, fechamento, exclusão e regras locais. Relatórios FIO orientaram o escopo, mas não substituíram a leitura do repositório.
+
+| Requisito / contexto SIM | Resultado | Conhecimento AS-IS e evidência |
+| --- | --- | --- |
+| REQ01 / RD01-RD03 | confirmado no repositório | **observado:** horários válidos existentes tornam-se uma grade reutilizável, com um cartão por horário. Entregas de documentos legados com mesmo horário continuam agregadas; documentos históricos não são unidos nem excluídos. Criação reutiliza horário já carregado ou um identificador estável protegido por transação. Evidências: `src/app/core/shipment-calendar.ts:15`, `src/app/core/delivery.service.ts:85`, `src/app/pages/store/store.component.ts:117`. |
+| REQ02 / RD02-RD06 | confirmado no repositório, com ressalva de interpretação legada | **observado:** seleção de dia, mês e Hoje sincroniza os contadores e a lista operacional; cadastro captura o dia selecionado. A data operacional prioriza data explícita da entrega, depois criação em São Paulo, depois data histórica da remessa. O fechamento financeiro continua por conclusão. Evidências: `src/app/core/shipment-calendar.ts:24`, `src/app/pages/store/store.component.ts:119`, `src/app/pages/store/store.component.ts:148`, `src/app/components/monthly-summary/monthly-summary.component.ts:15`, `src/app/components/monthly-summary/monthly-summary.ts:40`. |
+| Compatibilidade do entregador | confirmado no repositório | **observado:** entregas abertas são agrupadas por dia operacional e horário, preservando atrasadas. O histórico mostra o horário da remessa dentro de seu calendário de conclusão, sem reutilizar a data original do horário recorrente. Evidências: `src/app/pages/driver/driver-groups.ts:6`, `src/app/components/driver-history/driver-history.component.html`. |
+| REQ03 / RD04-RD05 | parcial: implementado localmente; remoto não verificado | **observado:** exclusão exige perfil STORE ativo, remove entrega e acompanhamento, retira a parada do manifesto e reordena as restantes. Previsões das paradas restantes são limpas para evitar horário desatualizado após mudança. Regras locais reservam delete privado e público a STORE e restringem atualização de manifesto pela loja ao conteúdo de rota. DRIVER não ganha delete de entrega/tracking. Evidências: `src/app/core/delivery.service.ts:242`, `firestore.rules`. |
+
+## Divergências e limites
+
+- **observado / a_confirmar quanto à interpretação:** RD06 na SIM propõe dia da remessa como inferência. O comportamento efetivo prioriza criação em São Paulo para legados sem data explícita, antes da data da remessa. Isso é decisão de arquitetura documentada em `domain.md` e no plano, não resposta humana registrada. Uma entrega legada criada em dia diferente de sua remessa aparecerá no dia da criação. Esta ressalva deve permanecer explícita; não promover a inferência SIM a decisão humana nem afirmar equivalência para todos os legados.
+- **observado:** ausência de duplicação refere-se à apresentação por horário e às novas criações canônicas. Clientes antigos, dados históricos ou um cliente sem horários legados carregados podem manter/criar documentos adicionais; não houve deduplicação destrutiva. Todas as entregas desses documentos continuam agregadas pelo horário e dia operacional.
+- **observado documentalmente:** `validation.md` reporta build aprovado, 80/80 testes e validação visual com fixtures; `review.md` reporta revisão independente e correção de rótulos posteriormente revisada pelo root. DIO não repetiu esses testes nem assume sua autoria.
+- **a_confirmar:** regras efetivamente publicadas e execução com Firebase real. CLI/autenticação não disponíveis segundo handoff; nenhuma implantação ou teste em emulador foi realizado. Alterar o arquivo de regras local não comprova permissão efetiva no projeto remoto.
+- **bloqueado:** publicação Obsidian, pois o vault permanece ausente. Nenhuma pergunta repetida é necessária para concluir esta análise local. Baseline remota preservada sem leitura ou alteração; histórico local anterior preservado.
+
+## Handoff DIO → CIM
+
+Resultado `partial`, com revalidação local observada de REQ01/02, compatibilidade do entregador e implementação local de REQ03. Retorno necessário: manter ressalva da data legada, informar que publicação das regras é pendente e registrar bloqueio documental do vault. Não declarar Firebase ou Obsidian atualizados. Estado anterior arquivado em `.dio/pagamentos-rota-20260926.yaml`; artefato anterior `plan/pagamentos-rota/asis-preliminar.md` preservado.

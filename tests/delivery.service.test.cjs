@@ -5,10 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
+const calendar = {};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/shipment-calendar.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: calendar, Date });
 const route = {};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/delivery-route.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: route });
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/delivery-route.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: route });
 const payment = {};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/payment.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: payment });
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/app/core/payment.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: payment });
 
 function setup() {
   const listeners = [];
@@ -76,7 +78,7 @@ function setup() {
     'firebase/firestore': firestore,
     'rxjs': require('rxjs'),
     './firebase': { auth: authState, db: {} },
-    './payment': payment, './delivery-route': route
+    './shipment-calendar': calendar, './payment': payment, './delivery-route': route
   };
   const source = fs.readFileSync(path.join(__dirname, '../src/app/core/delivery.service.ts'), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true } }).outputText;
@@ -120,15 +122,37 @@ test('invalid billing fails before writing any delivery or tracking', async () =
   assert.equal(h.batches.length, 0);
 });
 
-test('creates the first shipment with date, time and initial status', async () => {
+test('creates the first recurring shipment transactionally with deterministic time ID', async () => {
   const h = setup();
   const id = await h.service.createShipment({ date: '2026-09-26', time: '18:00' });
-  assert.equal(id, 'new-shipment');
-  assert.equal(h.additions.length, 1);
-  assert.equal(h.additions[0].ref.path, 'shipments');
-  assert.equal(h.additions[0].data.date, '2026-09-26');
-  assert.equal(h.additions[0].data.time, '18:00');
-  assert.equal(h.additions[0].data.status, 'WAITING');
+  assert.equal(id, 'slot-1800');
+  assert.equal(h.records.get('shipments/slot-1800').date, '2026-09-26');
+  assert.equal(h.records.get('shipments/slot-1800').time, '18:00');
+  assert.equal(h.records.get('shipments/slot-1800').status, 'WAITING');
+});
+
+test('daily shipments: reuse existing time across dates and transaction never overwrites existing slot',async()=>{
+ const h=setup(); h.service.shipments.set([{id:'legacy',time:'18:00',date:'2026-09-20'}]);
+ assert.equal(await h.service.createShipment({date:'2026-09-28',time:'18:00'}),'legacy');
+ assert.equal(h.batches.length,0);
+ h.service.shipments.set([]); h.records.set('shipments/slot-1800',{time:'18:00',date:'2026-09-20',status:'FINISHED'});
+ assert.equal(await h.service.createShipment({date:'2026-09-28',time:'18:00'}),'slot-1800');
+ assert.equal(h.records.get('shipments/slot-1800').date,'2026-09-20');
+ assert.equal(h.batches[0].writes.length,0);
+});
+
+test('daily shipments: persist selected delivery date and reject impossible explicit dates',async()=>{
+ const h=setup();
+ await h.service.createDelivery('s1',{...order,deliveryDate:'2026-09-28'});
+ assert.equal(h.batches[0].writes[0].data.deliveryDate,'2026-09-28');
+ await assert.rejects(h.service.createDelivery('s1',{...order,deliveryDate:'2026-02-30'}),/data/);
+ await assert.rejects(h.service.createDelivery('s1',{...order,deliveryDate:''}),/data/);
+ assert.equal(h.batches.length,1);
+});
+
+test('daily shipments: legacy callers without date default to current Sao Paulo day',async()=>{
+ const h=setup(); await h.service.createDelivery('s1',order);
+ assert.equal(h.batches[0].writes[0].data.deliveryDate,calendar.saoPauloDay());
 });
 
 test('rejects missing or impossible shipment dates and times before writing', async () => {
@@ -503,3 +527,5 @@ test('store can remove legacy delivery without tracking or route',async()=>{
  await h.service.manageDelivery('s1','legacy','delete');
  assert.equal(h.records.has('shipments/s1/deliveries/legacy'),false);
 });
+
+

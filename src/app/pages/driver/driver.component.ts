@@ -8,6 +8,7 @@ import { arrivalWhatsApp } from '../../core/driver-actions';
 import { amountToCollect, paymentLabel } from '../../core/payment';
 import { Delivery } from '../../models/models';
 import { DriverHistoryComponent } from '../../components/driver-history/driver-history.component';
+import { driverDayGroups } from './driver-groups';
 
 @Component({
   standalone: true,
@@ -118,19 +119,7 @@ export class DriverComponent implements OnDestroy {
   readonly amount = amountToCollect;
   readonly payment = paymentLabel;
   readonly whatsapp = arrivalWhatsApp;
-  readonly groups = computed(() => {
-    const groups = new Map<string, {id:string;label:string;deliveries:Delivery[]}>();
-    for(const delivery of this.orderedJobs()){
-      let group=groups.get(delivery.shipmentId);
-      if(!group){
-        const shipment=this.svc.shipments().find(s=>s.id===delivery.shipmentId);
-        group={id:delivery.shipmentId,label:shipment ? 'Remessa '+shipment.date.split('-').reverse().join('/')+' · '+shipment.time : 'Remessa',deliveries:[]};
-        groups.set(delivery.shipmentId,group);
-      }
-      group.deliveries.push(delivery);
-    }
-    return [...groups.values()];
-  });
+  readonly groups = computed(() => driverDayGroups(this.orderedJobs(), this.svc.shipments()));
   toggle(id:string):void { this.collapsed.update(ids=>ids.includes(id)?ids.filter(v=>v!==id):[...ids,id]); }
   expandGroup(deliveries:Delivery[],expand:boolean):void {
     const ids=new Set(deliveries.map(d=>d.id));

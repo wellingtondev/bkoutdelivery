@@ -24,7 +24,6 @@ export class DriverHistoryComponent implements OnChanges {
   get blanks(): number[] { return Array.from({ length: this.history.offset }, (_, index) => index); }
   get selected() { return this.history.days[this.selectedDay - 1]; }
   get selectedLabel(): string { return `${String(this.selectedDay).padStart(2, '0')}/${String(this.month + 1).padStart(2, '0')}/${this.year}`; }
-  shipmentDate(date: string): string { const parts = date.split('-'); return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : date; }
   selectDay(day: number): void { this.selectedDay = day; this.refresh(); }
   changeMonth(delta: number): void {
     const date = new Date(Date.UTC(this.year, this.month + delta, 1));

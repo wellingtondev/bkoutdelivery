@@ -125,3 +125,13 @@ Verificação: teste real no navegador até Praça Rui Barbosa, origem e duas pa
 ## Gerenciar entregas pela loja
 Na lista da remessa, Marcar como pago confirma pedido e taxa pagos; a atualização privada/pública é transacional e aparece nos listeners do entregador. Não altera status nem data de conclusão. Excluir entrega exige confirmação e remove entrega/tracking permanentemente, inclusive dos totais históricos. Remove a parada da rota, compacta posições e limpa estimativas restantes para recalcular.
 Publique novamente firestore.rules antes de excluir entregas vinculadas a rotas: STORE pode atualizar somente routeEntries do manifesto existente. Regras não são publicadas automaticamente. Validação local: 69 testes, build e navegador (pagamento e cancelamento da exclusão) com dados fictícios; nenhuma exclusão real realizada.
+
+## Remessas diárias e calendário
+
+Os horários de remessa são fixos e reutilizados todos os dias. Selecione o dia no calendário da loja antes de cadastrar: os cartões, contadores, lista e nova entrega usam esse dia. Horários legados repetidos são reunidos na tela, mantendo seus documentos e entregas. Não é necessário recriar os horários diariamente.
+
+Novas entregas salvam `deliveryDate`. Para registros antigos, o dia é obtido de `createdAt` em São Paulo; se ausente, usa a data histórica da remessa. O fechamento financeiro continua pela data real de conclusão (`deliveredAt`), podendo diferir do dia agendado.
+
+Para habilitar a exclusão em produção, copie o conteúdo completo de `firestore.rules` em **Firebase Console → Firestore Database → Regras** e clique em **Publicar**. O perfil em `users/{UID}` deve ter `role: "STORE"` e não pode ter `active: false`. As regras permitem à loja excluir a entrega e seu tracking e retirar a parada do manifesto. O campo `active` ausente é aceito, conforme o login. `firebase.json` também aponta para esse arquivo para publicação por CLI autenticada. Compilar ou publicar o aplicativo na Vercel não publica as regras Firebase.
+
+Validação desta mudança: 80 testes offline, build de produção e navegação com dados fictícios. Regras remotas não publicadas nem testadas neste ambiente.

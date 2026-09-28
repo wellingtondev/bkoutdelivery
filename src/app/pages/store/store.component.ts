@@ -1,4 +1,5 @@
 import { Component, OnDestroy, computed, signal } from '@angular/core';
+import { recurringShipments, deliveryDay, saoPauloDay } from '../../core/shipment-calendar';
 import { searchUberaba } from '../../core/address-search';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -113,10 +114,23 @@ export class StoreComponent implements OnDestroy {
   closeDelivery(): void { this.cancelAddressSearch(); this.show.set(false); }
   ngOnDestroy(): void { this.cancelAddressSearch(); }
 
-  activeShipment = computed<Shipment | undefined>(() => this.svc.shipments().find(s => s.id === this.selected()) ?? this.svc.shipments()[0]);
-  current = computed(() => this.svc.deliveries().filter(d => d.shipmentId === this.activeShipment()?.id));
-  count(id: string) { return this.svc.deliveries().filter(d => d.shipmentId === id).length; }
-  delivered(id: string) { return this.svc.deliveries().filter(d => d.shipmentId === id && d.status === 'DELIVERED').length; }
+  readonly selectedDate = signal(saoPauloDay(new Date()));
+  readonly shipmentSlots = computed(()=>recurringShipments(this.svc.shipments()));
+  readonly dailyDeliveries = computed(()=>this.svc.deliveries().filter(d=>deliveryDay(d,this.svc.shipments())===this.selectedDate()));
+  readonly deliveryCounts = computed(()=>{
+    const counts:Record<string,number>={};
+    for(const d of this.svc.deliveries()){const day=deliveryDay(d,this.svc.shipments());if(day)counts[day]=(counts[day]||0)+1;}
+    return counts;
+  });
+  selectDate(day:string):void { this.selectedDate.set(day); }
+  private inSlot(delivery:Delivery,id:string):boolean {
+    const time=this.svc.shipments().find(s=>s.id===id)?.time;
+    return !!time && this.svc.shipments().some(s=>s.id===delivery.shipmentId && s.time===time);
+  }
+  activeShipment = computed<Shipment | undefined>(() => this.shipmentSlots().find(s => s.id === this.selected()) ?? this.shipmentSlots()[0]);
+  current = computed(() => this.dailyDeliveries().filter(d => this.inSlot(d,this.activeShipment()?.id ?? '')));
+  count(id: string) { return this.dailyDeliveries().filter(d => this.inSlot(d,id)).length; }
+  delivered(id: string) { return this.dailyDeliveries().filter(d => this.inSlot(d,id) && d.status === 'DELIVERED').length; }
 
   private today(): string {
     const date = new Date();
@@ -131,6 +145,7 @@ export class StoreComponent implements OnDestroy {
     if (!this.activeShipment()) { this.openShipment(); return; }
     this.error.set('');
     this.form.shipmentId = this.activeShipment()!.id;
+    this.form.deliveryDate = this.selectedDate();
     this.show.set(true);
   }
 

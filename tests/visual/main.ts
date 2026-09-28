@@ -21,14 +21,14 @@ const base: Delivery = {
   customerName: 'Cliente de demonstração', phone: '(11) 00000-0000',
   address: 'Praça Rui Barbosa, Uberaba — MG (destino público de teste)',
   product: 'Pedido de demonstração', orderValue: 120, deliveryFee: 8,
-  paid: true, status: 'WAITING', ...destination,
+  paid: true, status: 'WAITING', deliveryDate:today, ...destination,
 };
 const deliveries = signal<Delivery[]>([
-  { ...base, id: 'fixture-1', customerName: 'Ana · demonstração', status: 'DELIVERED', deliveredAt: new Date(now.getFullYear(), now.getMonth(), Math.max(1, now.getDate() - 1), 14).toISOString() },
+  { ...base, id: 'fixture-1', customerName: 'Ana · demonstração', deliveryDate:'2026-09-26',shipmentId:'old-same-time', status: 'DELIVERED', deliveredAt: new Date(now.getFullYear(), now.getMonth(), Math.max(1, now.getDate() - 1), 14).toISOString() },
   { ...base, id: 'fixture-2', customerName: 'Bruno · demonstração', orderValue: 85.5, deliveryFee: 12, status: 'DELIVERED', deliveredAt: now.toISOString() },
   { ...base, id: 'fixture-3', customerName: 'Diego · demonstração', paid: false },
 ]);
-const shipments = signal<Shipment[]>([{ id: 'fixture-shipment', date: today, time: '18:00', status: 'WAITING' }]);
+const shipments = signal<Shipment[]>([{ id: 'fixture-shipment', date: today, time: '18:00', status: 'WAITING' },{id:'old-same-time',date:'2026-09-26',time:'18:00',status:'WAITING'}]);
 const service = {
   shipments, deliveries, error: signal(''), loading: signal(false),
   async createShipment(shipment: Pick<Shipment, 'date' | 'time'>): Promise<string> {

@@ -3,8 +3,8 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn(){ return request.auth != null; }
     function me(){ return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
-    function active(){ return signedIn() && me().data.active != false; }
-    function role(r){ return active() && me().data.role == r; }
+    function active(){ return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && me().data.get('active', true) != false; }
+    function role(r){ return active() && me().data.get('role', '') == r; }
     function staff(){ return role('STORE') || role('DRIVER'); }
 
     match /users/{uid} {
@@ -30,7 +30,8 @@ service cloud.firestore {
       // A client may open its secret link, never enumerate other customers.
       allow get: if true;
       allow list: if false;
-      allow write: if staff();
+      allow create, update: if staff();
+      allow delete: if role('STORE');
     }
   }
 }

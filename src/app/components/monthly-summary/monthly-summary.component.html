@@ -12,8 +12,8 @@
   <p class="muted note">Os valores representam entregas concluídas; não são um comprovante de recebimento dos pagamentos.</p>
   <div class="detail-grid">
     <div class="calendar"><div class="calendar-heading"><h3>Calendário de entregas</h3><span>Selecione um dia</span></div>
-      <div class="days"><span class="weekday" *ngFor="let weekday of weekdays">{{ weekday }}</span><span *ngFor="let blank of blanks" aria-hidden="true"></span>
-        <button type="button" *ngFor="let day of closing.days" [class.selected]="day.day === selectedDay" [class.has-deliveries]="day.count > 0" [class.current-day]="isToday(day.key)" [attr.aria-pressed]="day.day === selectedDay" [attr.aria-label]="day.key + ': ' + day.count + ' entregas concluídas'" (click)="selectedDay = day.day"><span>{{ day.day }}</span><small *ngIf="day.count">{{ day.count }}<span class="count-label"> entrega{{ day.count === 1 ? '' : 's' }}</span></small></button>
+      <p class="muted" *ngIf="deliveryCounts">Os números do calendário incluem todas as entregas do dia. O fechamento ao lado considera as concluídas.</p><div class="days"><span class="weekday" *ngFor="let weekday of weekdays">{{ weekday }}</span><span *ngFor="let blank of blanks" aria-hidden="true"></span>
+        <button type="button" *ngFor="let day of closing.days" [class.selected]="day.day === selectedDay" [class.has-deliveries]="(deliveryCounts ? (deliveryCounts[day.key] || 0) : day.count) > 0" [class.current-day]="isToday(day.key)" [attr.aria-pressed]="day.day === selectedDay" [attr.aria-label]="day.key + ': ' + (deliveryCounts ? (deliveryCounts[day.key] || 0) : day.count) + ' entregas'" (click)="selectDay(day.day)"><span>{{ day.day }}</span><small *ngIf="deliveryCounts ? deliveryCounts[day.key] : day.count">{{ deliveryCounts ? deliveryCounts[day.key] : day.count }}<span class="count-label"> entrega{{ (deliveryCounts ? deliveryCounts[day.key] : day.count) === 1 ? '' : 's' }}</span></small></button>
       </div>
     </div>
     <div class="day-detail" aria-live="polite"><p class="eyebrow">FECHAMENTO DO DIA</p><h3>{{ selectedLabel }}</h3>
@@ -23,3 +23,4 @@
     </div>
   </div>
 </section>
+
