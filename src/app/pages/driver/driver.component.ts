@@ -136,6 +136,12 @@ export class DriverComponent implements OnDestroy {
   }
   async confirm(id: string): Promise<void> {
     if (this.pending().includes(id)) return;
+    const delivery=this.jobs().find(item=>item.id===id);
+    if(!delivery)return;
+    if(!delivery.paid){
+      const total=this.amount(delivery).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+      if(!window.confirm(`Confirmar recebimento\n\nCliente: ${delivery.customerName}\nValor a receber: ${total}\nPagamento: ${this.payment(delivery)}\n\nVocê recebeu o valor do cliente?\nConfirme somente após receber para concluir a entrega.`))return;
+    }
     this.pending.update(ids => [...ids, id]); this.error.set('');
     try {
       if (this.location.activeDeliveryId() === id) await this.location.stop();
