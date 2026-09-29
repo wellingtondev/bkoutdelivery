@@ -45,7 +45,7 @@
             <li [class.done]="progress() === 3"><span>{{progress() === 3 ? '✓' : '3'}}</span><div><b>Entregue</b><small>Confirmação de recebimento.</small></div></li>
           </ol>
         </section>
-        <section class="tracking-panel order-panel"><p class="panel-eyebrow">SEU PEDIDO</p><h2>{{d.product}}</h2>
+        <section class="tracking-panel order-panel"><p class="panel-eyebrow">SEU PEDIDO</p><h2 class="product-lines">{{d.product}}</h2>
           <div><span>Valor do pedido</span><b>{{d.orderValue | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</b></div>
           <div><span>Pagamento</span><b class="payment" [class.paid]="d.paid">{{d.paid ? 'Pago' : 'Pendente'}}</b></div>
         </section>
@@ -56,6 +56,7 @@
     <section class="tracking-empty"><h1>{{state()?.error ? 'Não foi possível carregar o pedido' : 'Pedido não encontrado'}}</h1><p>{{state()?.error ? 'Confira sua conexão e recarregue a página.' : 'Confira o link de acompanhamento enviado pela loja.'}}</p></section>
   }
 </main>
+
 
 
 

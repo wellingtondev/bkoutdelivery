@@ -20,6 +20,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
   imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent, CustomerMapComponent],
   templateUrl: './store.component.html',
   styles: [`
+    .modal .manual-switch{display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;min-height:44px;cursor:pointer;margin:12px 0}.modal .manual-switch input{position:absolute;width:1px;height:1px;opacity:0}.switch-track{width:44px;height:26px;border-radius:20px;background:#555561;flex-shrink:0;position:relative}.switch-track:after{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:white;transition:transform .15s}.manual-switch input:checked+.switch-track{background:#ef3024}.manual-switch input:checked+.switch-track:after{transform:translateX(18px)}.manual-switch input:focus-visible+.switch-track{outline:2px solid white;outline-offset:3px}
     .delivery{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start}.delivery-details{min-width:0;overflow-wrap:anywhere}.delivery>.delivery-actions{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;flex-direction:row}.delivery-action{min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid #45454f;border-radius:10px;background:#25252d;color:#fafafa;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.delivery-action:hover{background:#34343e}.delivery-action:focus-visible{outline:2px solid #ff776e;outline-offset:3px}.delivery-action:disabled{opacity:.45;cursor:not-allowed}.delivery-action.danger{color:#ffaca5;border-color:#69362f;background:#351e1d}.delivery-action.danger:hover{background:#512622}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
     .address-suggestions{display:grid;gap:6px;margin:8px 0 18px;padding:10px;border:1px solid #464650;border-radius:12px;background:#18181e}.address-suggestions button{min-height:44px;padding:12px;text-align:left;background:#26262e;color:#fafafa;border:1px solid #3b3b46;border-radius:8px;cursor:pointer;overflow-wrap:anywhere}.address-suggestions button:focus-visible{outline:2px solid #ff776e}.address-suggestions small{text-align:right;padding:4px;color:#bdbdc8}.empty-state{text-align:center;padding:36px 24px}
     .empty-state .btn{margin:20px auto 0}
@@ -37,6 +38,13 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
 export class StoreComponent implements OnDestroy {
   readonly showCustomers = signal(false);
   readonly editing = signal<Delivery|null>(null);
+  readonly manualEntry = signal(false);
+  setManualEntry(enabled:boolean):void {
+    if(this.editing() || this.saving())return;
+    this.cancelAddressSearch();this.manualEntry.set(enabled);
+    this.addressStatus.set(enabled?'Informe o endereço completo e a taxa combinada. O ponto no mapa é opcional.':'Selecione uma sugestão ou confirme o destino no mapa.');
+    if(!enabled){this.form.deliveryFee=0;this.refreshDeliveryFee();}
+  }
   readonly destinationChanged = signal(false);
   readonly preserveFee = computed(()=>!!this.editing() && !this.destinationChanged());
   readonly deliveryAction = signal<{delivery:Delivery;action:'paid'|'delete'}|null>(null);
@@ -90,7 +98,7 @@ export class StoreComponent implements OnDestroy {
     const zones = this.zonesService.config();
     return point && zones ? deliveryFeeForPoint(point, zones) : null;
   });
-  readonly feeReady = computed(() => this.preserveFee() || (!this.zonesService.loading() && !this.zonesService.error()
+  readonly feeReady = computed(() => this.manualEntry() || this.preserveFee() || (!this.zonesService.loading() && !this.zonesService.error()
     && (!this.zonesService.config() || !!this.feeQuote())));
   readonly feeZoneLabel = computed(() => {
     switch (this.feeQuote()?.zone) {
@@ -106,6 +114,7 @@ export class StoreComponent implements OnDestroy {
   }
 
   refreshDeliveryFee(): void {
+    if(this.manualEntry())return;
     if(this.preserveFee()){this.form.deliveryFee=this.editing()!.deliveryFee;return;}
     if (this.zonesService.loading() || this.zonesService.error()) this.form.deliveryFee = 0;
     else if (this.zonesService.config()) this.form.deliveryFee = this.feeQuote()?.fee ?? 0;
@@ -144,6 +153,7 @@ export class StoreComponent implements OnDestroy {
     this.form.lng = undefined;
     this.refreshDeliveryFee();
     const address = this.form.address.trim();
+    if(this.manualEntry()){this.addressStatus.set('Endereço manual. Confira a rua, o número e o bairro.');return;}
     this.addressStatus.set(address.length < 3 ? 'Digite a rua e o número para ver sugestões em Uberaba.' : 'Buscando sugestões…');
     if (address.length < 3) return;
     const version = this.addressVersion;
@@ -163,6 +173,7 @@ export class StoreComponent implements OnDestroy {
   }
 
   async selectAddress(suggestion:AddressSuggestion):Promise<void> {
+    if(this.manualEntry())return;
     this.cancelAddressSearch(false);
     const version=this.addressVersion;
     const request=new AbortController();this.addressRequest=request;
@@ -188,7 +199,7 @@ export class StoreComponent implements OnDestroy {
   }
   closeDelivery(): void {
     if(this.saving())return;
-    this.cancelAddressSearch(); this.show.set(false);this.editing.set(null);this.destinationChanged.set(false);
+    this.cancelAddressSearch(); this.show.set(false);this.editing.set(null);this.manualEntry.set(false);this.destinationChanged.set(false);
     this.form=this.emptyForm();this.destination.set(null);this.addressStatus.set('');
   }
   ngOnDestroy(): void { this.cancelAddressSearch(); }
@@ -222,7 +233,7 @@ export class StoreComponent implements OnDestroy {
 
   open(): void {
     if (!this.activeShipment()) { this.openShipment(); return; }
-    this.cancelAddressSearch();this.editing.set(null);this.destinationChanged.set(false);
+    this.cancelAddressSearch();this.editing.set(null);this.manualEntry.set(false);this.destinationChanged.set(false);
     this.form=this.emptyForm();this.destination.set(null);this.addressStatus.set('');
     this.error.set('');
     this.form.shipmentId = this.activeShipment()!.id;
@@ -233,7 +244,7 @@ export class StoreComponent implements OnDestroy {
   edit(delivery:Delivery):void {
     if(delivery.status==='DELIVERED' || this.saving() || this.actionPending())return;
     this.cancelAddressSearch();this.error.set('');this.actionMessage.set('');
-    this.editing.set({...delivery});this.destinationChanged.set(false);
+    this.manualEntry.set(false);this.editing.set({...delivery});this.destinationChanged.set(false);
     this.form={shipmentId:delivery.shipmentId,deliveryDate:delivery.deliveryDate ?? deliveryDay(delivery,this.svc.shipments()) ?? undefined,
       customerName:delivery.customerName,phone:delivery.phone,address:delivery.address,product:delivery.product,
       orderValue:delivery.orderValue,deliveryFee:delivery.deliveryFee,paid:delivery.paid,paymentMethod:delivery.paymentMethod,
@@ -275,7 +286,7 @@ export class StoreComponent implements OnDestroy {
     this.saving.set(true);
     this.error.set('');
     const original=this.editing();
-    const delivery = { ...this.form, ...(original?{shipmentId:original.shipmentId,deliveryDate:original.deliveryDate ?? deliveryDay(original,this.svc.shipments()) ?? undefined}:{}) };
+    const delivery = { ...this.form, manualEntry:!original && this.manualEntry(), ...(original?{shipmentId:original.shipmentId,deliveryDate:original.deliveryDate ?? deliveryDay(original,this.svc.shipments()) ?? undefined}:{}) };
     try {
       if(original)await this.svc.updateDelivery(original.shipmentId,original.id,delivery);
       else await this.svc.add(delivery);
@@ -285,7 +296,7 @@ export class StoreComponent implements OnDestroy {
       this.show.set(false);
       this.form = this.emptyForm();
       this.destination.set(null);
-      this.editing.set(null);this.destinationChanged.set(false);
+      this.editing.set(null);this.manualEntry.set(false);this.destinationChanged.set(false);
       this.actionMessage.set(original?'Entrega atualizada. O acompanhamento e o entregador receberão as alterações.':'Entrega criada.');
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Não foi possível salvar a entrega.');
@@ -294,6 +305,8 @@ export class StoreComponent implements OnDestroy {
     }
   }
 }
+
+
 
 
 

@@ -52,7 +52,7 @@ import { driverDayGroups } from './driver-groups';
               <p>{{d.address}}</p>
               <div class="collection" [class.paid]="d.paid"><span>{{d.paid ? 'Pedido pago' : 'A RECEBER DO CLIENTE'}}</span><strong>{{amount(d) | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</strong><b>{{payment(d)}}</b></div>
               @if(!collapsed().includes(d.id)){
-                <p><b>{{d.product}}</b> · {{d.status === 'OUT_FOR_DELIVERY' ? 'Em rota' : 'Aguardando'}}</p>
+                <p><b class="product-lines">{{d.product}}</b> · {{d.status === 'OUT_FOR_DELIVERY' ? 'Em rota' : 'Aguardando'}}</p>
                 @if(d.notes){<div class="delivery-note"><b>📝 Observação da loja</b><p>{{d.notes}}</p></div>}
                 <div class="actions">
                   <a class="btn secondary" target="_blank" rel="noopener" [href]="mapUrl(d)">Abrir destino</a>
@@ -150,3 +150,4 @@ export class DriverComponent implements OnDestroy {
   async logout(): Promise<void> { await this.stopGps(); await this.auth.logout(); }
   ngOnDestroy(): void { this.routeRequest?.abort(); void this.location.stop().catch(() => {}); }
 }
+

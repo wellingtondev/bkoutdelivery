@@ -109,6 +109,21 @@ function setup() {
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
 
+test('explicit manual creation bypasses unavailable zones and omits unknown coordinates',async()=>{
+ const h=setup();h.failRead(new Error('zones unavailable'));
+ await h.service.createDelivery('s1',{...order,manualEntry:true,lat:undefined,lng:undefined,deliveryFee:17});
+ const writes=h.batches.at(-1).writes;
+ assert.equal(writes[0].data.deliveryFee,17);assert.equal(writes[0].data.manualEntry,true);
+ assert.equal('lat' in writes[0].data,false);assert.equal('destination' in writes[1].data,false);
+ assert.equal(writes[0].data.address,order.address);assert.equal(writes[1].data.status,'WAITING');
+});
+test('manual creation validates fee and rejects partial coordinates',async()=>{
+ const h=setup();
+ await assert.rejects(()=>h.service.createDelivery('s1',{...order,manualEntry:true,deliveryFee:-1}),/valor/i);
+ await assert.rejects(()=>h.service.createDelivery('s1',{...order,manualEntry:true,lng:undefined}),/destino/);
+ assert.equal(h.batches.length,0);
+});
+
 test('store edit updates tracking safely and preserves historical fee and operational fields', async () => {
   const h=setup();h.signIn({uid:'store'});h.records.set('users/store',{role:'STORE'});
   h.records.set('shipments/s1/deliveries/d1',{...order,trackingToken:'token',status:'OUT_FOR_DELIVERY',driverId:'driver',deliveryFee:12});

@@ -102,24 +102,28 @@ export class DeliveryService implements OnDestroy {
 
   async createDelivery(shipmentId: string, delivery: NewDelivery | Delivery): Promise<string> {
     if (!shipmentId) throw new Error('Selecione uma remessa.');
-    if (!delivery.address.trim() || !Number.isFinite(delivery.lat) || !Number.isFinite(delivery.lng) || Math.abs(delivery.lat!) > 90 || Math.abs(delivery.lng!) > 180) {
+    const manual=delivery.manualEntry===true;
+    const hasPoint=Number.isFinite(delivery.lat)&&Number.isFinite(delivery.lng)&&Math.abs(delivery.lat!)<=90&&Math.abs(delivery.lng!)<=180;
+    const noPoint=delivery.lat==null&&delivery.lng==null;
+    if (!delivery.address.trim() || (!hasPoint && !(manual&&noPoint))) {
       throw new Error('Informe o endereço e confirme o destino no mapa.');
     }
+    if(![delivery.orderValue,delivery.deliveryFee].every(value=>Number.isFinite(value)&&value>=0))throw new Error('Informe valores válidos para o pedido e a taxa.');
     const payment = normalizePayment(delivery);
     const deliveryDate = delivery.deliveryDate === undefined ? saoPauloDay() : delivery.deliveryDate;
     if (!validDeliveryDate(deliveryDate)) throw new Error('Informe uma data válida para a entrega.');
     const creatingUid = auth.currentUser?.uid;
-    const zoneSettings = await getDoc(doc(db, 'settings', 'deliveryZones'));
+    const zoneSettings = manual ? null : await getDoc(doc(db, 'settings', 'deliveryZones'));
     if (auth.currentUser?.uid !== creatingUid) throw new Error('A sessão mudou. Entre novamente antes de cadastrar a entrega.');
-    const quote = zoneSettings.exists() ? deliveryFeeForPoint({ lat: delivery.lat!, lng: delivery.lng! }, zoneSettings.data() as DeliveryZones) : null;
-    if (zoneSettings.exists() && !quote) throw new Error('As zonas de entrega estão inválidas. Corrija a configuração antes de cadastrar.');
+    const quote = zoneSettings?.exists() ? deliveryFeeForPoint({ lat: delivery.lat!, lng: delivery.lng! }, zoneSettings.data() as DeliveryZones) : null;
+    if (zoneSettings?.exists() && !quote) throw new Error('As zonas de entrega estão inválidas. Corrija a configuração antes de cadastrar.');
     const deliveryRef = doc(collection(db, 'shipments', shipmentId, 'deliveries'));
     const trackingCode = crypto.randomUUID();
     const batch = writeBatch(db);
     batch.set(deliveryRef, {
       shipmentId, deliveryDate, trackingCode, trackingToken: trackingCode,
       customerName: delivery.customerName, phone: delivery.phone, address: delivery.address,
-      lat: delivery.lat, lng: delivery.lng,
+      ...(hasPoint?{lat: delivery.lat, lng: delivery.lng}:{}), ...(manual?{manualEntry:true}:{}),
       product: delivery.product, orderValue: delivery.orderValue, deliveryFee: quote?.fee ?? delivery.deliveryFee,
       ...(quote ? { feeZone: quote.zone } : {}),
       paid: delivery.paid, ...payment, status: 'WAITING', createdAt: serverTimestamp()
@@ -128,7 +132,7 @@ export class DeliveryService implements OnDestroy {
       trackingCode, shipmentId, deliveryId: deliveryRef.id,
       customerName: delivery.customerName, product: delivery.product,
       orderValue: delivery.orderValue, paid: delivery.paid,
-      destination: { lat: delivery.lat, lng: delivery.lng }, trackingActive: false,
+      ...(hasPoint?{destination: { lat: delivery.lat, lng: delivery.lng }}:{}), trackingActive: false,
       status: 'WAITING', createdAt: serverTimestamp()
     });
     await batch.commit();
