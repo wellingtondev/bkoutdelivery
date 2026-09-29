@@ -4,7 +4,7 @@ import { collection, doc, getDoc, onSnapshot, runTransaction, serverTimestamp, w
 import { Observable, Subscription } from 'rxjs';
 import { Delivery, NewDelivery, PublicTracking, Shipment } from '../models/models';
 import { auth, db } from './firebase';
-import { normalizePayment } from './payment';
+import { normalizePayment, amountToCollect } from './payment';
 import { routeEntries, routeEntry, routeKey } from './delivery-route';
 import { recurringShipments, saoPauloDay, validDeliveryDate } from './shipment-calendar';
 import { DeliveryZones, deliveryFeeForPoint } from './delivery-zones';
@@ -218,7 +218,7 @@ export class DeliveryService implements OnDestroy {
     await this.updateStatus(shipmentId, deliveryId, trackingCode, { status: 'OUT_FOR_DELIVERY', startedAt: serverTimestamp() });
   }
 
-  async finishDelivery(shipmentId: string, deliveryId: string, trackingCode: string): Promise<void> {
+  async finishDelivery(shipmentId: string, deliveryId: string, trackingCode: string, receivedAmount?: number): Promise<void> {
     const deliveryRef = doc(db, 'shipments', shipmentId, 'deliveries', deliveryId);
     const driverId = auth.currentUser?.uid;
     if (!driverId) throw new Error('Entre novamente para confirmar a entrega.');
@@ -231,6 +231,8 @@ export class DeliveryService implements OnDestroy {
       if (snapshot.data()['driverId'] && snapshot.data()['driverId'] !== driverId) {
         throw new Error('Esta entrega está com outro entregador.');
       }
+      const received=receivedAmount!==undefined && !snapshot.data()['paid'];
+      if(received && (!Number.isFinite(receivedAmount)||Math.round(receivedAmount!*100)!==Math.round(amountToCollect(snapshot.data() as Delivery)*100)))throw new Error('O valor da entrega mudou. Confira o valor atualizado e confirme o recebimento novamente.');
       const manifest = await transaction.get(manifestRef);
       const entries = routeEntries(manifest.data()?.['routeEntries']).filter(entry => entry.id !== deliveryId || entry.shipmentId !== shipmentId);
       const remaining = [];
@@ -241,8 +243,9 @@ export class DeliveryService implements OnDestroy {
       }
       if (auth.currentUser?.uid !== driverId) throw new Error('Entre novamente para confirmar a entrega.');
       const update = { status: 'DELIVERED', deliveredAt: serverTimestamp(), trackingActive: false, driverLocation: null, routePosition: null, estimatedArrival: null };
-      transaction.update(deliveryRef, { ...update, driverId });
-      transaction.update(doc(db, 'tracking', trackingCode), update);
+      const paymentUpdate=received?{paid:true,paidAt:serverTimestamp(),receivedBy:driverId}:{};
+      transaction.update(deliveryRef, { ...update, driverId, ...paymentUpdate });
+      transaction.update(doc(db, 'tracking', trackingCode), {...update,...(received?{paid:true}:{})});
       remaining.forEach(({ entry, ref }, index) => {
         transaction.update(ref, { routeOrder: index + 1 });
         transaction.update(doc(db, 'tracking', entry.trackingToken), { routePosition: index + 1 });
@@ -302,10 +305,10 @@ export class DeliveryService implements OnDestroy {
     });
   }
 
-  async confirm(deliveryId: string): Promise<void> {
+  async confirm(deliveryId: string, receivedAmount?: number): Promise<void> {
     const delivery = this.deliveries().find(item => item.id === deliveryId);
     if (!delivery) throw new Error('Entrega não encontrada.');
-    await this.finishDelivery(delivery.shipmentId, delivery.id, delivery.trackingToken);
+    await this.finishDelivery(delivery.shipmentId, delivery.id, delivery.trackingToken, receivedAmount);
   }
 
   async manageDelivery(shipmentId: string, deliveryId: string, action: 'paid' | 'delete'): Promise<void> {

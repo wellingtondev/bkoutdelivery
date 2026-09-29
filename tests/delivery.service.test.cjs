@@ -109,6 +109,18 @@ function setup() {
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
 
+test('receipt confirmation marks private and public paid atomically with completion',async()=>{
+ const h=setup();loadStaff(h);h.emitCollection('shipments/s1/deliveries',[{...order,id:'d1',trackingToken:'token1',status:'WAITING'}]);
+ await h.service.confirm('d1',30);
+ const writes=h.batches[0].writes;assert.equal(writes[0].data.paid,true);assert.equal(writes[1].data.paid,true);
+ assert.equal(writes[0].data.status,'DELIVERED');assert.equal(writes[0].data.receivedBy,'staff');assert.equal(writes[1].data.receivedBy,undefined);
+});
+test('receipt confirmation rejects changed amount without completing or charging',async()=>{
+ const h=setup();loadStaff(h);h.emitCollection('shipments/s1/deliveries',[{...order,id:'d1',trackingToken:'token1',status:'WAITING'}]);
+ await assert.rejects(()=>h.service.confirm('d1',29),/valor.*mudou/);
+ assert.equal(h.batches[0].writes.length,0);
+});
+
 test('explicit manual creation bypasses unavailable zones and omits unknown coordinates',async()=>{
  const h=setup();h.failRead(new Error('zones unavailable'));
  await h.service.createDelivery('s1',{...order,manualEntry:true,lat:undefined,lng:undefined,deliveryFee:17});

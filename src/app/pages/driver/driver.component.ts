@@ -145,7 +145,7 @@ export class DriverComponent implements OnDestroy {
     this.pending.update(ids => [...ids, id]); this.error.set('');
     try {
       if (this.location.activeDeliveryId() === id) await this.location.stop();
-      await this.svc.confirm(id);
+      await this.svc.confirm(id, delivery.paid ? undefined : this.amount(delivery));
     } catch (error) { this.error.set(error instanceof Error ? error.message : 'Não foi possível confirmar a entrega.'); }
     finally { this.pending.update(ids => ids.filter(item => item !== id)); }
   }
