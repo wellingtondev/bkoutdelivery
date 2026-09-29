@@ -11,7 +11,7 @@
       <section class="tracking-map-card">
         <div class="section-heading"><h2>Trajeto da entrega</h2><span class="live-badge" [class.live]="isLive()">{{isLive() ? '● AO VIVO' : progress() === 3 ? 'FINALIZADO' : 'GPS PAUSADO'}}</span></div>
         @if(d.destination || position()) {
-          <app-delivery-map [destination]="d.destination ?? null" [driverPosition]="position()"></app-delivery-map>
+          <app-delivery-map [destination]="d.destination ?? null" [driverPosition]="position()" [routePath]="routePath()"></app-delivery-map>
         } @else {
           <div class="map-placeholder"><span>⌖</span><h3>Destino ainda não marcado</h3><p>A loja não informou um ponto no mapa para este pedido. As atualizações de status continuam disponíveis abaixo.</p></div>
         }
@@ -22,9 +22,21 @@
           @else if(progress() !== 3){A posição aparece quando o entregador ativa o GPS. Atualizações antigas não são exibidas como ao vivo.}
           @else{Seu pedido foi marcado como entregue.}</small></div>
         </div>
+        @if(isLive() && d.destination) {
+          <p class="route-note" role="status">@if(liveRoute().loading){Atualizando o trajeto…}@else if(liveRoute().error){Não foi possível calcular o trajeto agora. A localização continua atualizando.}@else if(routePath().length){Trajeto estimado a partir da última posição recebida.@if(laterStop()){ Este trecho vai direto ao seu endereço e não inclui as paradas anteriores.}}</p>
+        }
+        <section class="partner-profile" aria-label="Perfil parceiro">
+          <span class="partner-avatar" aria-hidden="true">🐺</span>
+          <div><p>Perfil parceiro</p><h2>Motoboy Parceiro</h2><span class="partner-stars" role="img" aria-label="Cinco estrelas decorativas">★★★★★</span></div>
+        </section>
       </section>
       <aside>
-        @if(d.status !== 'DELIVERED' && estimatedTime()){<section class="tracking-panel"><p class="panel-eyebrow">PREVISÃO DE CHEGADA</p>@if(estimateLate()){<h2>Previsão em atualização</h2><p>O horário estimado passou. Aguarde uma atualização do entregador.</p>}@else{<h2>{{estimatedTime() | date:'dd/MM · HH:mm':'-0300'}}</h2><p>Horário de Brasília. Horário estimado, sujeito a mudanças. Ao recalcular a rota, consideramos o trajeto e 3 minutos entre paradas, sem trânsito em tempo real.</p>}</section>}
+        @if(liveArrivalTime()) {
+          <section class="tracking-panel live-eta"><p class="panel-eyebrow">PREVISÃO PELO TRAJETO ATUAL</p><h2>{{liveMinutes() > 0 ? liveMinutes() + ' min' : 'Chegada próxima'}}</h2><p>Por volta de {{liveArrivalTime() | date:'HH:mm':'-0300'}} · horário de Brasília.</p><small>Estimativa a partir do GPS e do trajeto calculado. Pode mudar durante a entrega.</small></section>
+        } @else if(d.status === 'OUT_FOR_DELIVERY' && !laterStop()) {
+          <section class="tracking-panel"><p class="panel-eyebrow">PREVISÃO DE CHEGADA</p><h2>{{isLive() && liveRoute().loading ? 'Calculando o trajeto' : 'Aguardando atualização'}}</h2><p>A previsão aparece quando há uma localização recente e um trajeto disponível.</p></section>
+        }
+        @if(d.status !== 'DELIVERED' && (laterStop() || d.status === 'WAITING') && estimatedTime()){<section class="tracking-panel"><p class="panel-eyebrow">PREVISÃO DE CHEGADA</p>@if(estimateLate()){<h2>Previsão em atualização</h2><p>O horário estimado passou. Aguarde uma atualização do entregador.</p>}@else{<h2>{{estimatedTime() | date:'dd/MM · HH:mm':'-0300'}}</h2><p>Horário de Brasília. Previsão salva pelo entregador para a sequência de paradas, sujeita a mudanças. O trecho exibido no mapa não inclui as paradas anteriores.</p>}</section>}
         @if(d.status !== 'DELIVERED' && d.routePosition){<section class="tracking-panel"><p class="panel-eyebrow">SUA VEZ NA ROTA</p><h2>{{d.routePosition === 1 ? "Você é a próxima parada" : d.routePosition + "ª parada"}}</h2><p>A ordem foi organizada pelo entregador e pode mudar durante o trajeto. Ela não representa um horário garantido.</p></section>}
         <section class="tracking-panel"><p class="panel-eyebrow">ETAPAS DO PEDIDO</p>
           <ol class="steps">
@@ -44,3 +56,6 @@
     <section class="tracking-empty"><h1>{{state()?.error ? 'Não foi possível carregar o pedido' : 'Pedido não encontrado'}}</h1><p>{{state()?.error ? 'Confira sua conexão e recarregue a página.' : 'Confira o link de acompanhamento enviado pela loja.'}}</p></section>
   }
 </main>
+
+
+

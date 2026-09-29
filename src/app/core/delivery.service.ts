@@ -140,6 +140,64 @@ export class DeliveryService implements OnDestroy {
     return this.createDelivery(delivery.shipmentId, delivery);
   }
 
+  async updateDelivery(shipmentId: string, deliveryId: string, input: NewDelivery): Promise<void> {
+    const uid=auth.currentUser?.uid;
+    if(!uid) throw new Error('Entre novamente para alterar a entrega.');
+    if(input.shipmentId!==shipmentId) throw new Error('Não é possível mudar a remessa nesta edição.');
+    if(![input.customerName,input.phone,input.address,input.product].every(value=>typeof value==='string' && value.trim())) throw new Error('Preencha os dados da entrega.');
+    if(![input.orderValue,input.deliveryFee].every(value=>Number.isFinite(value)&&value>=0)) throw new Error('Informe valores válidos.');
+    if(typeof input.paid!=='boolean') throw new Error('Informe a situação do pagamento.');
+    if(!Number.isFinite(input.lat)||!Number.isFinite(input.lng)||Math.abs(input.lat!)>90||Math.abs(input.lng!)>180) throw new Error('Confirme o destino no mapa.');
+    if(!input.deliveryDate||!validDeliveryDate(input.deliveryDate)) throw new Error('Informe uma data válida.');
+    const payment=normalizePayment(input);
+    await runTransaction(db,async transaction=>{
+      const profile=await transaction.get(doc(db,'users',uid));
+      if(profile.data()?.['role']!=='STORE'||profile.data()?.['active']===false) throw new Error('Somente a loja pode alterar a entrega.');
+      const ref=doc(db,'shipments',shipmentId,'deliveries',deliveryId);
+      const snapshot=await transaction.get(ref);
+      if(!snapshot.exists()) throw new Error('A entrega não existe mais.');
+      const data=snapshot.data();
+      if(data['status']==='DELIVERED') throw new Error('Esta entrega foi concluída. Seus dados históricos não podem ser editados.');
+      const destinationChanged=data['lat']!==input.lat||data['lng']!==input.lng;
+      if(data['paid']&&!input.paid) throw new Error('O pagamento já foi confirmado. Atualize a página antes de editar.');
+      const token=data['trackingToken']??data['trackingCode'];
+      if(!token) throw new Error('Esta entrega não possui tracking válido.');
+      const trackingRef=doc(db,'tracking',token);
+      const tracking=await transaction.get(trackingRef);
+      if(!tracking.exists()) throw new Error('O tracking não existe mais.');
+      let deliveryFee=data['deliveryFee'];
+      let feeZone=data['feeZone']??null;
+      if(destinationChanged){
+        const zones=await transaction.get(doc(db,'settings','deliveryZones'));
+        const quote=zones.exists()?deliveryFeeForPoint({lat:input.lat!,lng:input.lng!},zones.data() as DeliveryZones):null;
+        if(zones.exists()&&!quote) throw new Error('Corrija a configuração das zonas antes de alterar o destino.');
+        deliveryFee=quote?.fee??input.deliveryFee;feeZone=quote?.zone??null;
+      }
+      const peers: {ref:ReturnType<typeof doc>;tracking:ReturnType<typeof doc>|null}[]=[];
+      if(destinationChanged&&data['driverId']){
+        const manifest=await transaction.get(doc(db,'driverLocations',data['driverId']));
+        for(const entry of routeEntries(manifest.data()?.['routeEntries'])){
+          if(entry.id===deliveryId&&entry.shipmentId===shipmentId)continue;
+          const peerRef=doc(db,'shipments',entry.shipmentId,'deliveries',entry.id);
+          const peer=await transaction.get(peerRef);
+          if(!peer.exists()||peer.data()['driverId']!==data['driverId']||peer.data()['status']==='DELIVERED')continue;
+          const peerTrackingRef=doc(db,'tracking',entry.trackingToken);
+          const peerTracking=await transaction.get(peerTrackingRef);
+          peers.push({ref:peerRef,tracking:peerTracking.exists()?peerTrackingRef:null});
+        }
+      }
+      if(auth.currentUser?.uid!==uid) throw new Error('Sua sessão mudou. Entre novamente.');
+      transaction.update(ref,{
+        customerName:input.customerName.trim(),phone:input.phone.trim(),address:input.address.trim(),product:input.product.trim(),
+        orderValue:input.orderValue,deliveryFee,feeZone,paid:input.paid,
+        notes:payment.notes??'',paymentMethod:payment.paymentMethod??null,installments:payment.installments??null,
+        lat:input.lat,lng:input.lng,updatedAt:serverTimestamp(),...(destinationChanged?{estimatedArrival:null}:{})
+      });
+      transaction.update(trackingRef,{customerName:input.customerName.trim(),product:input.product.trim(),orderValue:input.orderValue,paid:input.paid,destination:{lat:input.lat,lng:input.lng},...(destinationChanged?{estimatedArrival:null}:{})});
+      for(const peer of peers){transaction.update(peer.ref,{estimatedArrival:null});if(peer.tracking)transaction.update(peer.tracking,{estimatedArrival:null});}
+    });
+  }
+
   getTracking(trackingCode: string): Observable<PublicTracking | undefined> {
     return new Observable(subscriber => {
       if (!trackingCode || trackingCode.includes('/')) { subscriber.next(undefined); subscriber.complete(); return; }

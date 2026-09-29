@@ -10,7 +10,7 @@ function setup(){
  const noop=()=>()=>{};
  class EventEmitter{values=[];emit(value){this.values.push(value);}}
  const source=fs.readFileSync(path.join(__dirname,'../src/app/components/delivery-zones-editor/delivery-zones-editor.component.ts'),'utf8');
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText,{exports,require:name=>name==='@angular/core'?{Component:noop,Input:noop,Output:noop,ViewChild:noop,signal,EventEmitter}:name==='leaflet'?{}:{validateDeliveryZones:()=>invalid},structuredClone});
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText,{exports,require:name=>name==='@angular/core'?{Component:noop,Input:noop,Output:noop,ViewChild:noop,signal,EventEmitter}:name.includes('google-maps')?{loadGoogleMaps:async()=>{throw new Error('Configure a chave do Google Maps para carregar o mapa.');}}:{validateDeliveryZones:()=>invalid},structuredClone});
  const editor=new exports.DeliveryZonesEditorComponent({run:fn=>fn(),runOutsideAngular:fn=>fn()});
  editor.zones={schemaVersion:1,green:[{lat:1,lng:1}],yellow:[{lat:2,lng:2}]}; editor.ngOnInit();
  return {editor,reject:message=>invalid=message};
@@ -38,11 +38,26 @@ test('REQ01 moving vertices edits active zone only and incoming changes preserve
  editor.zones={schemaVersion:1,green:[],yellow:[]};editor.ngOnChanges();assert.equal(editor.draft.yellow[0].lat,5);
  editor.saving=true;editor.moveVertex(0,{lat:7,lng:8});assert.equal(editor.draft.yellow[0].lat,5);
 });
-test('REQ01 map overlay displays yellow below green and removes invalid zones',()=>{
- const exports={},polygons=[];let invalid=null;let clears=0;
+test('REQ01 Google map overlay displays yellow below green and removes invalid zones',()=>{
+ const exports={},polygons=[];let invalid=null;let removed=0;
  const noop=()=>()=>{};
  const source=fs.readFileSync(path.join(__dirname,'../src/app/components/delivery-map/delivery-map.component.ts'),'utf8');
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText,{exports,require:name=>name==='@angular/core'?{Component:noop,Input:noop,Output:noop,ViewChild:noop,signal:()=>()=>false,EventEmitter:class{}}:name==='leaflet'?{polygon:(points,options)=>({addTo:()=>polygons.push({points,options})})}:{validateDeliveryZones:()=>invalid}});
- const map=new exports.DeliveryMapComponent({});map.zoneLayers={clearLayers:()=>clears++};map.zones={schemaVersion:1,green:[{lat:1,lng:1}],yellow:[{lat:2,lng:2}]};map.ngOnChanges();assert.equal(polygons.length,2);assert.equal(polygons[0].points,map.zones.yellow);assert.equal(polygons[1].points,map.zones.green);assert.equal(polygons[0].options.interactive,false);
- invalid='Invalid';map.ngOnChanges();assert.equal(polygons.length,2);assert.equal(clears,2);
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText,{exports,require:name=>name==='@angular/core'?{Component:noop,Input:noop,Output:noop,ViewChild:noop,signal:()=>()=>false,EventEmitter:class{}}:name.includes('google-maps')?{}:{validateDeliveryZones:()=>invalid}});
+ const map=new exports.DeliveryMapComponent({});map.map={};map.maps={Polygon:class{constructor(options){polygons.push(options);}setMap(value){assert.equal(value,null);removed++;}}};map.zones={schemaVersion:1,green:[{lat:1,lng:1}],yellow:[{lat:2,lng:2}]};map.ngOnChanges();assert.equal(polygons.length,2);assert.equal(polygons[0].paths,map.zones.yellow);assert.equal(polygons[1].paths,map.zones.green);assert.equal(polygons[0].clickable,false);
+ invalid='Invalid';map.ngOnChanges();assert.equal(polygons.length,2);assert.equal(removed,2);
+});
+test('Google editor missing API key exposes error instead of uncaught rejection',async()=>{
+ const {editor}=setup();await editor.ngAfterViewInit();assert.equal(editor.tileError(),true);assert.equal(editor.mapLoading(),false);
+});
+
+test('Google map uses wolf DOM marker and releases markers/polygons/listeners on destroy',()=>{
+ const exports={},markers=[];let cleared=0,disconnected=0;
+ const noop=()=>()=>{};
+ const source=fs.readFileSync(path.join(__dirname,'../src/app/components/delivery-map/delivery-map.component.ts'),'utf8');
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true}}).outputText,{exports,document:{createElement:()=>({style:{},setAttribute(){}})},require:name=>name==='@angular/core'?{Component:noop,Input:noop,Output:noop,ViewChild:noop,signal:()=>()=>false,EventEmitter:class{}}:name.includes('google-maps')?{}:{validateDeliveryZones:()=>null}});
+ const component=new exports.DeliveryMapComponent({});component.map={setCenter(){},setZoom(){}};
+ component.maps={event:{clearInstanceListeners:()=>cleared++}};
+ component.Marker=class{constructor(options){Object.assign(this,options);markers.push(this);}addListener(){return {remove(){}};}};
+ component.driverPosition={lat:-19.747,lng:-47.939};component.ngOnChanges();assert.equal(markers.length,1);assert.equal(markers[0].content.textContent,'🐺');assert.equal(markers[0].title,'Última localização do entregador Blackout');
+ component.observer={disconnect:()=>disconnected++};component.ngOnDestroy();assert.equal(markers[0].map,null);assert.equal(disconnected,1);assert.equal(cleared,2);
 });

@@ -109,6 +109,44 @@ function setup() {
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
 
+test('store edit updates tracking safely and preserves historical fee and operational fields', async () => {
+  const h=setup();h.signIn({uid:'store'});h.records.set('users/store',{role:'STORE'});
+  h.records.set('shipments/s1/deliveries/d1',{...order,trackingToken:'token',status:'OUT_FOR_DELIVERY',driverId:'driver',deliveryFee:12});
+  h.records.set('tracking/token',{status:'OUT_FOR_DELIVERY'});
+  await h.service.updateDelivery('s1','d1',{...order,deliveryDate:'2026-09-29',customerName:'Novo',notes:'Privado',deliveryFee:99});
+  const d=h.records.get('shipments/s1/deliveries/d1'),t=h.records.get('tracking/token');
+  assert.equal(d.customerName,'Novo');assert.equal(d.deliveryFee,12);assert.equal(d.driverId,'driver');assert.equal(d.status,'OUT_FOR_DELIVERY');
+  assert.equal(t.customerName,'Novo');assert.equal(t.notes,undefined);assert.equal(t.phone,undefined);
+});
+test('store edit rejects nonstore and invalid values without writing',async()=>{
+  const h=setup();h.signIn({uid:'driver'});h.records.set('users/driver',{role:'DRIVER'});
+  await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,deliveryDate:'2026-09-29'}),/loja/);
+  await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,orderValue:-1,deliveryDate:'2026-09-29'}),/valor/i);
+  assert.equal(h.batches.flatMap(b=>b.writes).length,0);
+});
+test('store edit rejects completion and payment confirmed since form opened',async()=>{
+  const h=setup();h.signIn({uid:'store'});h.records.set('users/store',{role:'STORE'});
+  const p='shipments/s1/deliveries/d1';
+  h.records.set(p,{...order,status:'DELIVERED'});
+  await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,deliveryDate:'2026-09-29'}),/concluída/);
+  h.records.set(p,{...order,status:'WAITING',paid:true});
+  await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,deliveryDate:'2026-09-29'}),/pagamento/);
+  assert.equal(h.batches.flatMap(b=>b.writes).length,0);
+});
+test('store edit destination invalidates entire assigned route ETA atomically',async()=>{
+  const h=setup();h.signIn({uid:'store'});h.records.set('users/store',{role:'STORE'});
+  h.records.set('shipments/s1/deliveries/d1',{...order,trackingToken:'token',status:'WAITING',driverId:'driver'});
+  h.records.set('tracking/token',{});
+  h.records.set('driverLocations/driver',{routeEntries:[{id:'d2',shipmentId:'s1',trackingToken:'t2'}]});
+  h.records.set('shipments/s1/deliveries/d2',{driverId:'driver',status:'WAITING',estimatedArrival:'old',routeOrder:2});
+  h.records.set('tracking/t2',{estimatedArrival:'old',routePosition:2});
+  await h.service.updateDelivery('s1','d1',{...order,lat:-19.7,deliveryFee:15,deliveryDate:'2026-09-29'});
+  assert.equal(h.records.get('shipments/s1/deliveries/d1').deliveryFee,15);
+  assert.equal(h.records.get('shipments/s1/deliveries/d2').estimatedArrival,null);
+  assert.equal(h.records.get('tracking/t2').estimatedArrival,null);
+  assert.equal(h.records.get('tracking/t2').routePosition,2);
+});
+
 test('zones creation recalculates configured fee and blocks invalid settings instead of fallback',async()=>{
  const h=setup(), square=(a,b)=>[{lat:a,lng:a},{lat:a,lng:b},{lat:b,lng:b},{lat:b,lng:a}];
  h.records.set('settings/deliveryZones',{schemaVersion:1,green:square(1,2),yellow:square(0,3)});

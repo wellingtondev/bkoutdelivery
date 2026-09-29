@@ -2,14 +2,16 @@
   <header><div><p class="eyebrow">TAXAS POR REGIÃO</p><h2 id="zones-title">Desenhe as zonas de entrega</h2></div><button type="button" (click)="close()" [disabled]="busy" aria-label="Fechar sem salvar">✕</button></header>
   <p class="instructions">Escolha uma zona e clique nos pontos do seu perímetro, em sequência. Arraste os pontos para ajustar. A zona amarela deve contornar toda a zona verde; fora da amarela, a taxa será R$ 15.</p>
   <div class="zone-options" aria-label="Zona em edição">
-    <button type="button" class="green" [class.active]="active==='green'" [attr.aria-pressed]="active==='green'" [disabled]="busy" (click)="choose('green')">Verde · R$ 10 <small>{{draft.green.length}} pontos</small></button>
-    <button type="button" class="yellow" [class.active]="active==='yellow'" [attr.aria-pressed]="active==='yellow'" [disabled]="busy" (click)="choose('yellow')">Amarela · R$ 12 <small>{{draft.yellow.length}} pontos</small></button>
+    <button type="button" class="green" [class.active]="active==='green'" [attr.aria-pressed]="active==='green'" [disabled]="busy || mapLoading() || tileError()" (click)="choose('green')">Verde · R$ 10 <small>{{draft.green.length}} pontos</small></button>
+    <button type="button" class="yellow" [class.active]="active==='yellow'" [attr.aria-pressed]="active==='yellow'" [disabled]="busy || mapLoading() || tileError()" (click)="choose('yellow')">Amarela · R$ 12 <small>{{draft.yellow.length}} pontos</small></button>
   </div>
   <div #canvas class="zone-map" role="region" aria-label="Mapa de Uberaba para desenhar zonas. Use setas para mover e mais ou menos para ampliar."></div>
-  <div class="tools"><button type="button" (click)="addCenter()" [disabled]="busy">Adicionar ponto no centro</button><button type="button" (click)="undo()" [disabled]="busy || !draft[active].length">Desfazer ponto</button><button type="button" (click)="clear()" [disabled]="busy || !draft[active].length">Limpar zona {{active==='green'?'verde':'amarela'}}</button></div>
+  <div class="tools"><button type="button" (click)="addCenter()" [disabled]="busy || mapLoading() || tileError()">Adicionar ponto no centro</button><button type="button" (click)="undo()" [disabled]="busy || mapLoading() || tileError() || !draft[active].length">Desfazer ponto</button><button type="button" (click)="clear()" [disabled]="busy || mapLoading() || tileError() || !draft[active].length">Limpar zona {{active==='green'?'verde':'amarela'}}</button></div>
   <p class="hint">Pelo menos 3 pontos por zona, sem cruzar as linhas. O desenho só será aplicado após salvar.</p>
-  @if(tileError()){<p class="feedback" role="status">Parte do mapa não carregou. Confira sua conexão antes de definir os limites.</p>}
+  @if(tileError()){<p class="feedback" role="status">Não foi possível carregar o Google Maps. Confira a configuração da chave e sua conexão antes de definir os limites.</p>}
+  @if(mapLoading()){<p role="status">Carregando Google Maps…</p>}
   @if(validationError() || error){<p class="feedback" role="alert">{{validationError() || error}}</p>}
   @if(loading){<p role="status">Carregando zonas…</p>}
-  <footer><button type="button" (click)="close()" [disabled]="busy">Cancelar</button><button class="save" type="button" (click)="save()" [disabled]="busy">{{saving?'Salvando…':'Salvar zonas'}}</button></footer>
+  <footer><button type="button" (click)="close()" [disabled]="busy">Cancelar</button><button class="save" type="button" (click)="save()" [disabled]="busy || mapLoading() || tileError()">{{saving?'Salvando…':'Salvar zonas'}}</button></footer>
 </section>
+

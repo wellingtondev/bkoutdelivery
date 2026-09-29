@@ -1,0 +1,8 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+function setup(key=''){
+ const api={},scripts=[],win={};const document={createElement:()=>({remove(){this.removed=true;}}),head:{appendChild(s){scripts.push(s);}},querySelector:()=>null};
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/app/core/google-maps.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:api,window:win,document,setTimeout,clearTimeout,URLSearchParams,DOMException,require:()=>({googleMapsConfig:{apiKey:key,mapId:'DEMO_MAP_ID'}})});return {api,scripts,win};
+}
+test('Google Maps missing key does not request any script',async()=>{const {api,scripts}=setup();await assert.rejects(api.loadGoogleMaps(),/chave/);assert.equal(scripts.length,0);});
+test('Google Maps concurrent consumers share script and recover from network failure',async()=>{const {api,scripts,win}=setup('public-test-key');const first=api.loadGoogleMaps();const second=api.loadGoogleMaps();assert.equal(scripts.length,1);assert.match(scripts[0].src,/maps.googleapis.com/);scripts[0].onerror();await assert.rejects(first);await assert.rejects(second);const retry=api.loadGoogleMaps();assert.equal(scripts.length,2);win.google={maps:{importLibrary:async()=>({})}};win.__blackoutGoogleMapsReady();assert.equal(await retry,win.google.maps);});
+test('SDK waits abort promptly and ignore a late response',async()=>{const {api}=setup();const c=new AbortController();let finish;const response=new Promise(resolve=>finish=resolve);const work=api.withAbort(response,c.signal);c.abort();await assert.rejects(work,{name:'AbortError'});finish('late');});

@@ -45,11 +45,12 @@
       <h2>Remessa {{shipment.time}} <small>· {{selectedDate() | date:'dd/MM/yyyy'}}</small></h2>
       @for (d of current(); track d.shipmentId + '/' + d.id) {
         <div class="delivery">
-          <div><b>{{d.customerName}}</b><small>{{d.product}} • {{d.address}}</small></div>
+          <div class="delivery-details"><b>{{d.customerName}}</b><small>{{d.product}} • {{d.address}}</small></div>
           <div><b>{{d.paid ? 'Pago' : 'A cobrar: ' + (amountToCollect(d) | currency:'BRL':'symbol':'1.2-2':'pt-BR')}}</b><small [class.ok]="d.paid">{{paymentLabel(d)}}</small></div>
-          <div class="delivery-actions"><a class="mini" [routerLink]="['/track', d.trackingToken]">Tracking</a>
-            @if(!d.paid){<button type="button" class="mini" [disabled]="actionPending()" (click)="askAction(d,'paid')">Marcar como pago</button>}
-            <button type="button" class="mini danger" [disabled]="actionPending()" (click)="askAction(d,'delete')">Excluir entrega</button></div>
+          <div class="delivery-actions" aria-label="Ações da entrega"><a class="delivery-action" [routerLink]="['/track', d.trackingToken]">Tracking</a>
+            <button type="button" class="delivery-action" [disabled]="d.status === 'DELIVERED' || actionPending() || saving()" [title]="d.status === 'DELIVERED' ? 'Entrega concluída: edição indisponível para preservar o histórico.' : 'Alterar os dados desta entrega'" (click)="edit(d)">Alterar entrega</button>
+            @if(!d.paid){<button type="button" class="delivery-action" [disabled]="actionPending()" (click)="askAction(d,'paid')">Marcar como pago</button>}
+            <button type="button" class="delivery-action danger" [disabled]="actionPending()" (click)="askAction(d,'delete')">Excluir entrega</button></div>
         </div>
       } @empty { <p class="muted">Nenhuma entrega nesta remessa. Clique em “Nova entrega” para cadastrar.</p> }
     </section>
@@ -81,9 +82,9 @@
   @if (show()) {
     <div class="overlay">
       <form class="modal card" role="dialog" aria-modal="true" aria-labelledby="delivery-title" #deliveryFormRef="ngForm" (ngSubmit)="deliveryFormRef.valid && save()">
-        <div class="row"><h2 id="delivery-title">Nova entrega</h2><button type="button" class="x" aria-label="Fechar cadastro de entrega" [disabled]="saving()" (click)="closeDelivery()">×</button></div>
-        <label>Remessa<select name="ship" [(ngModel)]="form.shipmentId" required>@for(s of shipmentSlots(); track s.id){<option [value]="s.id">{{s.time}} · diária</option>}</select></label>
-        <p class="muted">Dia da entrega: {{form.deliveryDate | date:'dd/MM/yyyy'}}. Selecione outro dia no calendário antes de cadastrar.</p>
+        <div class="row"><h2 id="delivery-title">{{editing() ? 'Alterar entrega' : 'Nova entrega'}}</h2><button type="button" class="x" aria-label="Fechar cadastro de entrega" [disabled]="saving()" (click)="closeDelivery()">×</button></div>
+        <label>Remessa<select name="ship" [(ngModel)]="form.shipmentId" [disabled]="!!editing() || saving()" required>@for(s of (editing() ? svc.shipments() : shipmentSlots()); track s.id){<option [value]="s.id">{{s.time}} · diária</option>}</select></label>
+        <p class="muted">Dia da entrega: {{form.deliveryDate | date:'dd/MM/yyyy'}}. {{editing() ? 'A data e a remessa originais serão preservadas.' : 'Selecione outro dia no calendário antes de cadastrar.'}}</p>
         <label>Nome do cliente<input name="name" [(ngModel)]="form.customerName" required></label>
         <label>Telefone<input name="phone" [(ngModel)]="form.phone" required></label>
         <label>Endereço completo<input name="address" [(ngModel)]="form.address" (ngModelChange)="addressChanged()" placeholder="Rua, número e bairro — Uberaba/MG" required></label>
@@ -95,9 +96,10 @@
         <label>Produto / pedido<input name="product" [(ngModel)]="form.product" required></label>
         <div class="two">
           <label>Valor do pedido<input type="number" name="value" [(ngModel)]="form.orderValue" min="0" step="0.01" required></label>
-          <label>Taxa de entrega<input type="number" name="fee" [(ngModel)]="form.deliveryFee" [readonly]="!!zonesService.config() || zonesService.loading() || !!zonesService.error()" min="0" step="0.01" required></label>
+          <label>Taxa de entrega<input type="number" name="fee" [(ngModel)]="form.deliveryFee" [readonly]="preserveFee() || !!zonesService.config() || zonesService.loading() || !!zonesService.error()" min="0" step="0.01" required></label>
         </div>
-        @if(zonesService.config()){<p class="fee-note" role="status"><strong>{{feeZoneLabel()}}</strong> · A taxa acompanha o destino no mapa. Confira a posição antes de salvar.</p>}
+        @if(preserveFee()){<p class="fee-note">Taxa original preservada. Ela só será recalculada se o destino mudar.</p>}
+        @else if(zonesService.config()){<p class="fee-note" role="status"><strong>{{feeZoneLabel()}}</strong> · A taxa acompanha o destino no mapa. Confira a posição antes de salvar.</p>}
         @if(zonesService.error()){<p class="feedback" role="alert">{{zonesService.error()}}</p>}
         <label class="check"><input type="checkbox" name="paid" [(ngModel)]="form.paid" (ngModelChange)="paymentChanged()"> Pedido e taxa de entrega já estão pagos</label>
         @if (!form.paid) {
@@ -116,8 +118,9 @@
         <label>Observação para o entregador<textarea name="notes" [(ngModel)]="form.notes" maxlength="500" rows="3" placeholder="Ex.: chamar no portão azul, levar troco para R$ 200."></textarea></label>
         <small class="muted">{{form.notes?.length || 0}}/500 · Visível para a loja e o entregador.</small>
         @if (error()) { <p class="feedback" role="alert">{{error()}}</p> }
-        <button class="btn" [disabled]="saving() || deliveryFormRef.invalid || !destination() || !feeReady()">{{saving() ? 'Salvando...' : 'Criar entrega e tracking'}}</button>
+        <div class="store-actions"><button type="button" class="btn secondary" [disabled]="saving()" (click)="closeDelivery()">Cancelar</button><button class="btn" [disabled]="saving() || deliveryFormRef.invalid || !destination() || !feeReady()">{{saving() ? 'Salvando...' : editing() ? 'Salvar alterações' : 'Criar entrega e tracking'}}</button></div>
       </form>
     </div>
   }
 </main>
+

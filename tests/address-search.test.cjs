@@ -1,27 +1,6 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const ts = require('typescript');
-const source = ts.transpileModule(fs.readFileSync('src/app/core/address-search.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-function setup(fetch) { const exports = {}; vm.runInNewContext(source, { exports, URLSearchParams, fetch }); return exports.searchUberaba; }
-const feature = (city = 'Uberaba', type = 'street') => ({ properties: { city, countrycode: 'BR', type, name: 'Rua Exemplo' }, geometry: { coordinates: [-47.94, -19.75] } });
-test('search restricts results to Uberaba and forwards cancellation signal', async () => {
-  const controller = new AbortController();
-  const search = setup(async (url, options) => {
-    assert.match(new URL(url).searchParams.get('q'), /Uberaba, Minas Gerais, Brasil/);
-    assert.equal(options.signal, controller.signal);
-    return { ok: true, json: async () => ({ features: [feature('Uberlândia'), feature()] }) };
-  });
-  const result = await search('Rua Exemplo', controller.signal);
-  assert.equal(result.lat, -19.75); assert.match(result.label, /Uberaba/);
-});
-test('does not mark city centroids or invalid coordinates as an address', async () => {
-  const invalid = feature(); invalid.geometry.coordinates = [NaN, null];
-  const search = setup(async () => ({ ok: true, json: async () => ({ features: [feature('Uberaba', 'city'), invalid] }) }));
-  assert.equal(await search('Uberaba', new AbortController().signal), null);
-});
-test('provider errors propagate for manual fallback', async () => {
-  const search = setup(async () => ({ ok: false }));
-  await assert.rejects(search('Rua Exemplo', new AbortController().signal), /indisponível/);
-});
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript');
+function setup(geocode){const exports={};vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/app/core/address-search.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,DOMException,URLSearchParams,fetch:()=>{throw Error('Legacy provider must not be used');},require:()=>({loadGoogleMaps:async()=>({importLibrary:async()=>({Geocoder:class{geocode=geocode;}})}),withAbort:async(p,signal)=>{const result=await p;if(signal.aborted)throw new DOMException('cancelled','AbortError');return result;}})});return exports.searchUberaba;}
+const result=(city='Uberaba',extra={})=>({types:['street_address'],formatted_address:'Rua Exemplo, Uberaba - MG',geometry:{location:{lat:()=>-19.75,lng:()=>-47.94}},address_components:[{types:['administrative_area_level_2'],long_name:city},{types:['administrative_area_level_1'],short_name:'MG'},{types:['country'],short_name:'BR'}],...extra});
+test('Google geocoding restricts city/state and keeps address query, accepts exact Uberaba point',async()=>{const search=setup(async request=>{assert.match(request.address,/Uberaba/);assert.equal(request.componentRestrictions.country,'BR');return {results:[result('Uberlândia'),result()]};});assert.equal((await search('Rua Exemplo, 10',new AbortController().signal)).lat,-19.75);});
+test('Google geocoding rejects centroid, partial match, wrong state and invalid coordinates',async()=>{const search=setup(async()=>({results:[result('Uberaba',{types:['locality']}),result('Uberaba',{partial_match:true}),result('Uberaba',{geometry:{location:{lat:()=>NaN,lng:()=>-47}}}),result('Uberaba',{address_components:[{types:['country'],short_name:'BR'},{types:['administrative_area_level_1'],short_name:'SP'},{types:['locality'],long_name:'Uberaba'}]})]}));assert.equal(await search('Rua Exemplo',new AbortController().signal),null);});
+test('Google geocoding no matches returns null, denied requests propagate, cancelled result is ignored',async()=>{const none=setup(async()=>{throw {code:'ZERO_RESULTS'};});assert.equal(await none('Rua Exemplo',new AbortController().signal),null);const denied=setup(async()=>{throw Error('REQUEST_DENIED');});await assert.rejects(denied('Rua Exemplo',new AbortController().signal),/REQUEST_DENIED/);const c=new AbortController();const late=setup(async()=>{c.abort();return {results:[result()]};});await assert.rejects(late('Rua Exemplo',c.signal),{name:'AbortError'});});

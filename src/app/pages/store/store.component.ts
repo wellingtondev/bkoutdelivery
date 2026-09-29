@@ -19,7 +19,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
   imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent],
   templateUrl: './store.component.html',
   styles: [`
-    .delivery-actions{display:flex;gap:8px;flex-wrap:wrap}.danger{color:#ff8b83}.delivery{flex-wrap:wrap}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
+    .delivery{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start}.delivery-details{min-width:0;overflow-wrap:anywhere}.delivery>.delivery-actions{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;flex-direction:row}.delivery-action{min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid #45454f;border-radius:10px;background:#25252d;color:#fafafa;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.delivery-action:hover{background:#34343e}.delivery-action:focus-visible{outline:2px solid #ff776e;outline-offset:3px}.delivery-action:disabled{opacity:.45;cursor:not-allowed}.delivery-action.danger{color:#ffaca5;border-color:#69362f;background:#351e1d}.delivery-action.danger:hover{background:#512622}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
     .empty-state{text-align:center;padding:36px 24px}
     .empty-state .btn{margin:20px auto 0}
     .feedback{color:#ff8b83;line-height:1.5}
@@ -30,10 +30,13 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
     .collection-total{padding:14px;border:1px solid #ff5147;border-radius:12px;background:#ff514710}.collection-total strong{display:block;font-size:1.4rem;margin-top:4px}
     .modal .check input{width:auto}
     .zone-summary{margin:0 0 24px;line-height:1.6}.zone-summary p{margin:6px 0}.fee-note{line-height:1.5}.fee-note strong{color:#fafafa}.modal input[readonly]{background:#232327;color:#fff;border-color:#565662}
-    @media(max-width:760px){.store-actions{width:100%}}
+    @media(max-width:760px){.store-actions{width:100%}.delivery{grid-template-columns:minmax(0,1fr)}.delivery>.delivery-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.delivery-action{padding:10px 8px}}
   `]
 })
 export class StoreComponent implements OnDestroy {
+  readonly editing = signal<Delivery|null>(null);
+  readonly destinationChanged = signal(false);
+  readonly preserveFee = computed(()=>!!this.editing() && !this.destinationChanged());
   readonly deliveryAction = signal<{delivery:Delivery;action:'paid'|'delete'}|null>(null);
   readonly actionPending = signal(false);
   readonly actionError = signal('');
@@ -82,8 +85,8 @@ export class StoreComponent implements OnDestroy {
     const zones = this.zonesService.config();
     return point && zones ? deliveryFeeForPoint(point, zones) : null;
   });
-  readonly feeReady = computed(() => !this.zonesService.loading() && !this.zonesService.error()
-    && (!this.zonesService.config() || !!this.feeQuote()));
+  readonly feeReady = computed(() => this.preserveFee() || (!this.zonesService.loading() && !this.zonesService.error()
+    && (!this.zonesService.config() || !!this.feeQuote())));
   readonly feeZoneLabel = computed(() => {
     switch (this.feeQuote()?.zone) {
       case 'GREEN': return 'Zona verde';
@@ -98,6 +101,7 @@ export class StoreComponent implements OnDestroy {
   }
 
   refreshDeliveryFee(): void {
+    if(this.preserveFee()){this.form.deliveryFee=this.editing()!.deliveryFee;return;}
     if (this.zonesService.loading() || this.zonesService.error()) this.form.deliveryFee = 0;
     else if (this.zonesService.config()) this.form.deliveryFee = this.feeQuote()?.fee ?? 0;
   }
@@ -117,6 +121,8 @@ export class StoreComponent implements OnDestroy {
   }
 
   selectDestination(point: {lat:number;lng:number}): void {
+    const original=this.editing();
+    this.destinationChanged.set(!original || point.lat!==original.lat || point.lng!==original.lng);
     this.cancelAddressSearch();
     this.addressStatus.set('Ponto ajustado no mapa.');
     this.destination.set(point);
@@ -126,6 +132,7 @@ export class StoreComponent implements OnDestroy {
   }
 
   addressChanged(): void {
+    this.destinationChanged.set(true);
     this.cancelAddressSearch();
     this.destination.set(null);
     this.form.lat = undefined;
@@ -143,6 +150,8 @@ export class StoreComponent implements OnDestroy {
         const result = await searchUberaba(address, request.signal);
         if (version !== this.addressVersion) return;
         if (result) {
+          const original=this.editing();
+          this.destinationChanged.set(!original || result.lat!==original.lat || result.lng!==original.lng);
           this.destination.set({ lat: result.lat, lng: result.lng });
           this.form.lat = result.lat; this.form.lng = result.lng;
           this.refreshDeliveryFee();
@@ -159,7 +168,11 @@ export class StoreComponent implements OnDestroy {
     clearTimeout(this.addressTimer);
     this.addressRequest?.abort();
   }
-  closeDelivery(): void { this.cancelAddressSearch(); this.show.set(false); }
+  closeDelivery(): void {
+    if(this.saving())return;
+    this.cancelAddressSearch(); this.show.set(false);this.editing.set(null);this.destinationChanged.set(false);
+    this.form=this.emptyForm();this.destination.set(null);this.addressStatus.set('');
+  }
   ngOnDestroy(): void { this.cancelAddressSearch(); }
 
   readonly selectedDate = signal(saoPauloDay(new Date()));
@@ -191,10 +204,24 @@ export class StoreComponent implements OnDestroy {
 
   open(): void {
     if (!this.activeShipment()) { this.openShipment(); return; }
+    this.cancelAddressSearch();this.editing.set(null);this.destinationChanged.set(false);
+    this.form=this.emptyForm();this.destination.set(null);this.addressStatus.set('');
     this.error.set('');
     this.form.shipmentId = this.activeShipment()!.id;
     this.form.deliveryDate = this.selectedDate();
     this.show.set(true);
+  }
+
+  edit(delivery:Delivery):void {
+    if(delivery.status==='DELIVERED' || this.saving() || this.actionPending())return;
+    this.cancelAddressSearch();this.error.set('');this.actionMessage.set('');
+    this.editing.set({...delivery});this.destinationChanged.set(false);
+    this.form={shipmentId:delivery.shipmentId,deliveryDate:delivery.deliveryDate ?? deliveryDay(delivery,this.svc.shipments()) ?? undefined,
+      customerName:delivery.customerName,phone:delivery.phone,address:delivery.address,product:delivery.product,
+      orderValue:delivery.orderValue,deliveryFee:delivery.deliveryFee,paid:delivery.paid,paymentMethod:delivery.paymentMethod,
+      installments:delivery.installments,notes:delivery.notes,lat:delivery.lat,lng:delivery.lng};
+    this.destination.set(Number.isFinite(delivery.lat)&&Number.isFinite(delivery.lng)?{lat:delivery.lat!,lng:delivery.lng!}:null);
+    this.addressStatus.set('Endereço cadastrado. Altere somente se o destino da entrega mudou.');this.show.set(true);
   }
 
   openShipment(): void {
@@ -229,15 +256,19 @@ export class StoreComponent implements OnDestroy {
     }
     this.saving.set(true);
     this.error.set('');
-    const delivery = { ...this.form };
+    const original=this.editing();
+    const delivery = { ...this.form, ...(original?{shipmentId:original.shipmentId,deliveryDate:original.deliveryDate ?? deliveryDay(original,this.svc.shipments()) ?? undefined}:{}) };
     try {
-      await this.svc.add(delivery);
+      if(original)await this.svc.updateDelivery(original.shipmentId,original.id,delivery);
+      else await this.svc.add(delivery);
       this.selected.set(delivery.shipmentId);
       this.cancelAddressSearch();
       this.addressStatus.set('');
       this.show.set(false);
       this.form = this.emptyForm();
       this.destination.set(null);
+      this.editing.set(null);this.destinationChanged.set(false);
+      this.actionMessage.set(original?'Entrega atualizada. O acompanhamento e o entregador receberão as alterações.':'Entrega criada.');
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Não foi possível salvar a entrega.');
     } finally {
@@ -245,3 +276,4 @@ export class StoreComponent implements OnDestroy {
     }
   }
 }
+

@@ -33,14 +33,14 @@ import { driverDayGroups } from './driver-groups';
       <section class="card route-planner">
         <h2>Ordem da sua rota</h2>
         <p class="muted">Use as setas para organizar as paradas entre as remessas. Salvar vincula essas entregas a você e atualiza a posição no link do cliente.</p>
-        <p class="muted"><b>Saída:</b> {{originAddress}}</p><p class="muted">Ao salvar: saída agora, trajeto pelas ruas e 3 minutos entre paradas. Sem trânsito em tempo real. Salve novamente para recalcular.</p>
+        <p class="muted"><b>Saída:</b> {{originAddress}}</p><p class="muted">Ao salvar: saída agora, trajeto pelas ruas e 3 minutos entre paradas. O Google considera o trânsito na consulta. Salve novamente para recalcular.</p>
         @for(d of orderedJobs();track d.id;let index=$index){
           <div class="route-stop"><span>{{index+1}}. {{d.customerName}}</span><div><button class="mini" [disabled]="index===0 || routeSaving()" (click)="move(d.id,-1)" [attr.aria-label]="'Subir entrega de '+d.customerName">↑</button><button class="mini" [disabled]="index===orderedJobs().length-1 || routeSaving()" (click)="move(d.id,1)" [attr.aria-label]="'Descer entrega de '+d.customerName">↓</button></div></div>
           <p class="muted">{{d.address}}</p>
           @if(d.estimatedArrival){<p class="muted">Última previsão salva: {{d.estimatedArrival | date:'dd/MM HH:mm':'-0300'}} (Brasília)</p>}
         }
         <button class="btn" [disabled]="routeSaving() || !orderedJobs().length" (click)="saveRoute()">{{routeSaving() ? 'Calculando e salvando…' : 'Salvar ordem e calcular horários'}}</button>
-        <p role="status">{{routeMessage()}}</p><small>Rotas: <a href="https://routing.openstreetmap.de/about.html" target="_blank" rel="noopener">OSRM / FOSSGIS</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">Corrigir mapa</a></small>
+        <p role="status">{{routeMessage()}}</p><small>Rotas e estimativas: Google Maps · Sujeitas ao trânsito e às paradas.</small>
       </section>
       @for(group of groups(); track group.id){
         <section class="shipment-group">
