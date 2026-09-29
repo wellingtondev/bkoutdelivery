@@ -1,0 +1,6 @@
+# Revalidação AS-IS DIO
+Ciclo clientes-mapa-20260929; DIO1.0.1 fonte canônica anteriormente lida, execução incremental, sem vault informado. Fontes reanalisadas após implementação: core/customer-locations.ts, components/customer-map/*, pages/store/*, core/address-search.ts, core/delivery.service.ts.
+REQ01 observado: loja/zonas usamGoogle; Geocoder restringeUberaba, rejeita centroderua e número divergente quando identificável. Resultado confirmado no código/testes, serviço real a_confirmar.
+REQ02 observado: botãoClientes, mapaGoogle, nome/lobo, apenasconcluídas/coordenadasválidas, agrupamento exato pornome/posição, erro/loading/vazio e limpeza. Resultado confirmado no código/testes; render real a_confirmar.
+Relacionado loja-prioridade: edição e ações responsivas observadas, dadosprivados/públicos separados, proteção concluída/pagamento e taxa. Prioridade e WhatsApp não implementados: cobrança/número pendentes do usuário; preservar essa pendência.
+Evidência complementar:134/134 testes e buildprodução aprovados. Revisão cruzada: root revisoucomponente(helperagente); delivery_map revisoubusca/service(root). Nenhum achado bloqueante finaloffline. Sem publicação noObsidian porvaultausente. ResultadoCIM parcial porvalidaçãoGoogle/render e publicação nãoexecutadas. Não declarar funcionamento remoto nem transferênciaWhatsApp.

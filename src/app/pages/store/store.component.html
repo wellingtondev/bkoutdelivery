@@ -3,11 +3,15 @@
   <div class="hero">
     <div><p class="eyebrow">PAINEL DA LOJA</p><h1>Remessas e entregas</h1><p class="muted">Organize as remessas e acompanhe o andamento.</p></div>
     <div class="store-actions">
+      <button type="button" class="btn secondary fit" [disabled]="svc.loading() || !!svc.error()" (click)="showCustomers.set(true)">🐺 Clientes</button>
       <button type="button" class="btn secondary fit" [disabled]="zonesService.loading()" (click)="openZones()">Zonas de entrega</button>
       <button class="btn secondary fit" (click)="openShipment()">+ Novo horário</button>
       <button class="btn fit" [disabled]="svc.loading() || !svc.shipments().length" (click)="open()">+ Nova entrega</button>
     </div>
   </div>
+  @if(showCustomers()){
+    <app-customer-map [deliveries]="svc.deliveries()" [dataLoading]="svc.loading()" [dataError]="svc.error()" (closed)="showCustomers.set(false)"></app-customer-map>
+  }
   <section class="zone-summary" aria-label="Taxas por zona">
     @if(zonesService.loading()){<p class="muted" role="status">Carregando zonas de entrega…</p>}
     @else if(zonesService.error()){<p class="feedback" role="alert">{{zonesService.error()}}</p>}
@@ -88,8 +92,14 @@
         <label>Nome do cliente<input name="name" [(ngModel)]="form.customerName" required></label>
         <label>Telefone<input name="phone" [(ngModel)]="form.phone" required></label>
         <label>Endereço completo<input name="address" [(ngModel)]="form.address" (ngModelChange)="addressChanged()" placeholder="Rua, número e bairro — Uberaba/MG" required></label>
-        <p class="muted">Ao digitar, buscamos o endereço em Uberaba. Confira a entrada no mapa antes de salvar.</p>
+        <p class="muted">Busca no Google Maps em Uberaba. Digite rua, número e bairro (ex.: Rua Exemplo, 621 - Mercês). Confira a entrada no mapa antes de salvar.</p>
         <p class="muted" role="status">{{addressStatus()}}</p>
+        @if(addressSuggestions().length){
+          <div class="address-suggestions" aria-label="Sugestões de endereço">
+            @for(suggestion of addressSuggestions();track suggestion.id){<button type="button" [disabled]="selectingAddress() || saving()" (click)="selectAddress(suggestion)">{{suggestion.label}}</button>}
+            <small>Google Maps</small>
+          </div>
+        }
         <app-delivery-map [selectable]="true" [destination]="destination()" [zones]="zonesService.config()" (destinationChange)="selectDestination($event)"></app-delivery-map>
         @if(destination(); as point){<p class="muted" role="status">Destino selecionado: {{point.lat | number:'1.5-5'}}, {{point.lng | number:'1.5-5'}}</p>}
         @else{<p class="muted">Selecione o destino no mapa para continuar.</p>}
@@ -123,4 +133,5 @@
     </div>
   }
 </main>
+
 

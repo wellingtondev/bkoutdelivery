@@ -13,7 +13,7 @@ function load(file,deps={}){
 const core={effect:fn=>fn(),Component:decorator,Input:decorator,Output:decorator,signal,computed:fn=>fn,EventEmitter:class{values=[];emit(value){this.values.push(value);}}};
 const dates=load('core/shipment-calendar.ts');
 let lookup=async()=>null;
-const {StoreComponent}=load('pages/store/store.component.ts',{'@angular/core':core,'@angular/common':{},'@angular/forms':{},'@angular/router':{},'../../core/shipment-calendar':dates,'../../core/address-search':{searchUberaba:(...args)=>lookup(...args)},'../../core/delivery-zones.service':{},'../../core/delivery-zones':{deliveryFeeForPoint:(point)=>Number.isFinite(point.lat)?{zone:point.lat<1?'GREEN':point.lat<2?'YELLOW':'OUTSIDE',fee:point.lat<1?10:point.lat<2?12:15}:null},'../../components/delivery-zones-editor/delivery-zones-editor.component':{},'../../core/payment':{},'../../components/delivery-map/delivery-map.component':{},'../../components/monthly-summary/monthly-summary.component':{}});
+const {StoreComponent}=load('pages/store/store.component.ts',{'@angular/core':core,'@angular/common':{},'@angular/forms':{},'@angular/router':{},'../../core/shipment-calendar':dates,'../../core/address-autocomplete':{AddressAutocomplete:class{suggest(...args){return lookup(...args);}select(...args){return lookup(...args);}reset(){}},addressSearchError:()=> 'Busca indisponível. Marque no mapa.'},'../../core/delivery-zones.service':{},'../../core/delivery-zones':{deliveryFeeForPoint:(point)=>Number.isFinite(point.lat)?{zone:point.lat<1?'GREEN':point.lat<2?'YELLOW':'OUTSIDE',fee:point.lat<1?10:point.lat<2?12:15}:null},'../../components/delivery-zones-editor/delivery-zones-editor.component':{},'../../core/payment':{},'../../components/customer-map/customer-map.component':{},'../../components/delivery-map/delivery-map.component':{},'../../components/monthly-summary/monthly-summary.component':{}});
 test('store calendar filters cards and list by delivery day while merging historical equal schedules',()=>{
   const shipments=[{id:'a',time:'18:00',date:'2026-09-26'},{id:'b',time:'18:00',date:'2026-09-28'}];
   const deliveries=[{id:'old',shipmentId:'a',deliveryDate:'2026-09-26',status:'DELIVERED'},{id:'new',shipmentId:'a',deliveryDate:'2026-09-28',status:'WAITING'},{id:'duplicate-slot',shipmentId:'b',deliveryDate:'2026-09-28',status:'DELIVERED'}];
@@ -51,16 +51,22 @@ test('REQ03 absent zones preserve manual fee; loading and errors block creation'
  zones.loading.set(false);zones.error.set('permission denied');assert.equal(c.feeReady(),false);await c.save();assert.match(c.error(),/zonas/i);
 });
 
-test('REQ02 address search calculates fee; a late search cannot replace a manually adjusted destination',async()=>{
+test('suggestions never move destination until selected; late details cannot replace manual point',async()=>{
  const c=storeWithZones(zonesFixture({green:[],yellow:[]}));
  let began;const started=new Promise(resolve=>began=resolve);let finish;
  lookup=()=>{began();return new Promise(resolve=>finish=resolve);};
- c.form.address='Praça Rui Barbosa';c.addressChanged();await started;
- finish({lat:1,lng:0,label:'Destino de teste'});await new Promise(resolve=>setImmediate(resolve));
- assert.equal(c.form.deliveryFee,12);
- let beganAgain;const startedAgain=new Promise(resolve=>beganAgain=resolve);
- lookup=()=>{beganAgain();return new Promise(resolve=>finish=resolve);};
- c.form.address='Praça Rui Barbosa, Uberaba';c.addressChanged();await startedAgain;
- c.selectDestination({lat:0,lng:0});finish({lat:2,lng:0,label:'Resultado atrasado'});await new Promise(resolve=>setImmediate(resolve));
+ c.form.address='Rua A 123';c.addressChanged();await started;
+ const suggestion={id:'one',label:'Rua A 123 Uberaba',prediction:{}};
+ finish([suggestion]);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(c.addressSuggestions().length,1);assert.equal(c.destination(),null);assert.equal(c.form.deliveryFee,0);
+ lookup=async()=>({lat:1,lng:0,label:suggestion.label});await c.selectAddress(suggestion);
+ assert.equal(c.form.address,suggestion.label);assert.equal(c.form.deliveryFee,12);assert.equal(c.destination().lat,1);
+ lookup=()=>new Promise(resolve=>finish=resolve);const pending=c.selectAddress(suggestion);
+ c.selectDestination({lat:0,lng:0});finish({lat:2,lng:0,label:'Resultado atrasado'});await pending;
  assert.equal(c.form.deliveryFee,10);assert.equal(c.destination().lat,0);c.ngOnDestroy();
+});
+test('failed suggestions show actionable error and close cancels pending suggestion results',async()=>{
+ const c=storeWithZones(zonesFixture());let began;const started=new Promise(resolve=>began=resolve);let finish;
+ lookup=()=>{began();return new Promise(resolve=>finish=resolve);};c.form.address='Rua A 123';c.addressChanged();await started;c.closeDelivery();finish([{id:'old',label:'Antigo'}]);await new Promise(resolve=>setImmediate(resolve));assert.equal(c.addressSuggestions().length,0);
+ lookup=async()=>{throw Error('denied');};await c.selectAddress({id:'one',label:'Rua A 123',prediction:{}});assert.match(c.addressStatus(),/indisponível/);assert.equal(c.selectingAddress(),false);c.ngOnDestroy();
 });

@@ -1,0 +1,15 @@
+<section class="customer-panel" aria-labelledby="customer-map-title">
+  <div class="customer-heading"><div><p class="eyebrow">HISTÓRICO DA LOJA</p><h2 id="customer-map-title">Clientes no mapa</h2></div><button type="button" (click)="close()" aria-label="Fechar mapa de clientes">Fechar ×</button></div>
+  <p class="description">Locais de entregas concluídas, identificados pelo nome do cliente. O mesmo cliente no mesmo ponto aparece uma vez.</p>
+  @if(dataLoading){<p class="notice" role="status">Carregando entregas da loja…</p>}
+  @else if(dataError){<p class="notice error" role="alert">{{dataError}}</p>}
+  @else if(!locations.length){<p class="notice" role="status">Nenhum cliente com entrega concluída e localização cadastrada para mostrar.</p>}
+  @else{<p class="count">🐺 {{locations.length}} {{locations.length === 1 ? 'local de cliente' : 'locais de clientes'}}</p>}
+  <div #canvas class="customer-canvas" role="region" aria-label="Mapa Google dos locais onde entregas foram concluídas"></div>
+  @if(loading()){<p class="notice" role="status">Carregando Google Maps…</p>}
+  @if(error()){<p class="notice error" role="alert">{{error()}}</p>}
+  @if(!dataLoading && !dataError && omittedCount){<p class="description">{{omittedCount}} entrega(s) concluída(s) sem coordenadas válidas não aparecem no mapa.</p>}
+  @if(!dataLoading && !dataError && locations.length){
+    <details><summary>Ver nomes e quantidade de entregas</summary><ul>@for(point of locations;track $index){<li><span>{{point.name}}</span><small>{{point.deliveries}} entrega(s)</small></li>}</ul></details>
+  }
+</section>

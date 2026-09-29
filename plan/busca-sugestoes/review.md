@@ -1,0 +1,2 @@
+# Revisão cruzada
+Ciclo busca-sugestoes-20260929. Rootrevisou UI do agente: debounce600ms, buttons typebutton, somente seleção resolve destino, cancelamento versionado ao fechar/manual/novaquery, status diagnóstico. Agente delivery_map revisou coreRoot: favoráveloffline, camposmínimos/cidade/número/token/cancelamento/errossanitizados. 15testesdirecionados passaram. Não houve validaçãoGoogle real; navegador falhouinfra os error3. Não declararAPIhabilitada.

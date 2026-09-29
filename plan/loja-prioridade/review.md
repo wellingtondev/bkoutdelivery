@@ -17,3 +17,4 @@ updateDelivery nao valida status DELIVERED antes de atualizar orderValue e, com 
 - Cancelar formulario e erro nao criam nova entrega; layout das quatro acoes mobile sem overflow (visual pendente disponibilidade browser).
 
 Prioridade continua bloqueada por cobranca e numeroWhatsApp; deep-link ja confirmado segundo CIM. Nao afirmar validacao de REQ03/04 ainda.
+Revisão final posterior: guardconcluída e pagamento concorrente presentes; destino invalida peers. Revisão cruzada delivery_map favoráveloffline, ver ../clientes-mapa/review.md. Suiteintegrada134/134/buildaprovados. Prioridade seguependente.

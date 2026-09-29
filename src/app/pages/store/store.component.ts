@@ -3,24 +3,25 @@ import { DeliveryZonesService } from '../../core/delivery-zones.service';
 import { DeliveryZones, deliveryFeeForPoint } from '../../core/delivery-zones';
 import { DeliveryZonesEditorComponent } from '../../components/delivery-zones-editor/delivery-zones-editor.component';
 import { recurringShipments, deliveryDay, saoPauloDay } from '../../core/shipment-calendar';
-import { searchUberaba } from '../../core/address-search';
+import { AddressAutocomplete, AddressSuggestion, addressSearchError } from '../../core/address-autocomplete';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Delivery, NewDelivery, Shipment } from '../../models/models';
 import { DeliveryService } from '../../core/delivery.service';
 import { DeliveryMapComponent } from '../../components/delivery-map/delivery-map.component';
+import { CustomerMapComponent } from '../../components/customer-map/customer-map.component';
 import { MonthlySummaryComponent } from '../../components/monthly-summary/monthly-summary.component';
 import { AuthService } from '../../core/auth.service';
 import { amountToCollect, paymentLabel } from '../../core/payment';
 
 @Component({
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent, CustomerMapComponent],
   templateUrl: './store.component.html',
   styles: [`
     .delivery{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:start}.delivery-details{min-width:0;overflow-wrap:anywhere}.delivery>.delivery-actions{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;flex-direction:row}.delivery-action{min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid #45454f;border-radius:10px;background:#25252d;color:#fafafa;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none}.delivery-action:hover{background:#34343e}.delivery-action:focus-visible{outline:2px solid #ff776e;outline-offset:3px}.delivery-action:disabled{opacity:.45;cursor:not-allowed}.delivery-action.danger{color:#ffaca5;border-color:#69362f;background:#351e1d}.delivery-action.danger:hover{background:#512622}.store-actions{display:flex;gap:12px;flex-wrap:wrap}
-    .empty-state{text-align:center;padding:36px 24px}
+    .address-suggestions{display:grid;gap:6px;margin:8px 0 18px;padding:10px;border:1px solid #464650;border-radius:12px;background:#18181e}.address-suggestions button{min-height:44px;padding:12px;text-align:left;background:#26262e;color:#fafafa;border:1px solid #3b3b46;border-radius:8px;cursor:pointer;overflow-wrap:anywhere}.address-suggestions button:focus-visible{outline:2px solid #ff776e}.address-suggestions small{text-align:right;padding:4px;color:#bdbdc8}.empty-state{text-align:center;padding:36px 24px}
     .empty-state .btn{margin:20px auto 0}
     .feedback{color:#ff8b83;line-height:1.5}
     .shipment-date{margin:0 0 8px;color:#a1a1aa}
@@ -34,6 +35,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
   `]
 })
 export class StoreComponent implements OnDestroy {
+  readonly showCustomers = signal(false);
   readonly editing = signal<Delivery|null>(null);
   readonly destinationChanged = signal(false);
   readonly preserveFee = computed(()=>!!this.editing() && !this.destinationChanged());
@@ -62,6 +64,9 @@ export class StoreComponent implements OnDestroy {
     else if (this.form.paymentMethod !== 'CREDIT') this.form.installments = undefined;
   }
   addressStatus = signal('');
+  readonly addressSuggestions = signal<AddressSuggestion[]>([]);
+  readonly selectingAddress = signal(false);
+  private readonly autocomplete = new AddressAutocomplete();
   private addressTimer?: ReturnType<typeof setTimeout>;
   private addressRequest?: AbortController;
   private addressVersion = 0;
@@ -133,40 +138,53 @@ export class StoreComponent implements OnDestroy {
 
   addressChanged(): void {
     this.destinationChanged.set(true);
-    this.cancelAddressSearch();
+    this.cancelAddressSearch(false);
     this.destination.set(null);
     this.form.lat = undefined;
     this.form.lng = undefined;
     this.refreshDeliveryFee();
     const address = this.form.address.trim();
-    this.addressStatus.set(address.length < 6 ? 'Digite a rua e o número em Uberaba.' : 'Buscando endereço em Uberaba…');
-    if (address.length < 6) return;
+    this.addressStatus.set(address.length < 3 ? 'Digite a rua e o número para ver sugestões em Uberaba.' : 'Buscando sugestões…');
+    if (address.length < 3) return;
     const version = this.addressVersion;
     this.addressTimer = setTimeout(async () => {
       const request = new AbortController();
       this.addressRequest = request;
       const timeout = setTimeout(() => request.abort(), 10000);
       try {
-        const result = await searchUberaba(address, request.signal);
-        if (version !== this.addressVersion) return;
-        if (result) {
-          const original=this.editing();
-          this.destinationChanged.set(!original || result.lat!==original.lat || result.lng!==original.lng);
-          this.destination.set({ lat: result.lat, lng: result.lng });
-          this.form.lat = result.lat; this.form.lng = result.lng;
-          this.refreshDeliveryFee();
-          this.addressStatus.set(`Local encontrado: ${result.label}. Confira a entrada e ajuste o marcador: a posição pode ser aproximada.`);
-        } else this.addressStatus.set('Endereço não encontrado em Uberaba. Marque a entrada no mapa.');
-      } catch {
-        if (version === this.addressVersion) this.addressStatus.set('Busca indisponível. Você pode marcar a entrada no mapa.');
+        const suggestions = await this.autocomplete.suggest(address, request.signal);
+        if (version !== this.addressVersion || request.signal.aborted) return;
+        this.addressSuggestions.set(suggestions);
+        this.addressStatus.set(suggestions.length ? 'Selecione um endereço abaixo e confira o número e a entrada no mapa.' : 'Nenhuma sugestão encontrada. Confira o endereço ou marque a entrada no mapa.');
+      } catch(error) {
+        if (version === this.addressVersion) this.addressStatus.set(addressSearchError(error));
       } finally { clearTimeout(timeout); }
-    }, 1200);
+    }, 600);
   }
 
-  private cancelAddressSearch(): void {
+  async selectAddress(suggestion:AddressSuggestion):Promise<void> {
+    this.cancelAddressSearch(false);
+    const version=this.addressVersion;
+    const request=new AbortController();this.addressRequest=request;
+    this.selectingAddress.set(true);this.addressStatus.set('Localizando o endereço selecionado…');
+    const timeout=setTimeout(()=>request.abort(),10000);
+    try {
+      const result=await this.autocomplete.select(suggestion,request.signal);
+      if(version!==this.addressVersion||request.signal.aborted)return;
+      const original=this.editing();
+      this.destinationChanged.set(!original||result.lat!==original.lat||result.lng!==original.lng);
+      this.form.address=result.label;this.form.lat=result.lat;this.form.lng=result.lng;
+      this.destination.set({lat:result.lat,lng:result.lng});this.refreshDeliveryFee();
+      this.addressStatus.set('Endereço selecionado. Confira o número e ajuste o marcador na entrada, se necessário.');
+    }catch(error){if(version===this.addressVersion)this.addressStatus.set(addressSearchError(error));}
+    finally{clearTimeout(timeout);if(version===this.addressVersion)this.selectingAddress.set(false);}
+  }
+  private cancelAddressSearch(resetSession=true): void {
     this.addressVersion++;
     clearTimeout(this.addressTimer);
     this.addressRequest?.abort();
+    this.addressSuggestions.set([]);this.selectingAddress.set(false);
+    if(resetSession)this.autocomplete.reset();
   }
   closeDelivery(): void {
     if(this.saving())return;
@@ -276,4 +294,9 @@ export class StoreComponent implements OnDestroy {
     }
   }
 }
+
+
+
+
+
 
