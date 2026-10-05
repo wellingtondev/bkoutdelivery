@@ -12,12 +12,13 @@ import { DeliveryService } from '../../core/delivery.service';
 import { DeliveryMapComponent } from '../../components/delivery-map/delivery-map.component';
 import { CustomerMapComponent } from '../../components/customer-map/customer-map.component';
 import { MonthlySummaryComponent } from '../../components/monthly-summary/monthly-summary.component';
+import { DriverSettlementComponent } from '../../components/driver-settlement/driver-settlement.component';
 import { AuthService } from '../../core/auth.service';
 import { amountToCollect, paymentLabel } from '../../core/payment';
 
 @Component({
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DeliveryZonesEditorComponent, CustomerMapComponent],
+  imports: [CommonModule, FormsModule, RouterLink, DeliveryMapComponent, MonthlySummaryComponent, DriverSettlementComponent, DeliveryZonesEditorComponent, CustomerMapComponent],
   templateUrl: './store.component.html',
   styles: [`
     .modal .manual-switch{display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;min-height:44px;cursor:pointer;margin:12px 0}.modal .manual-switch input{position:absolute;width:1px;height:1px;opacity:0}.switch-track{width:44px;height:26px;border-radius:20px;background:#555561;flex-shrink:0;position:relative}.switch-track:after{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:white;transition:transform .15s}.manual-switch input:checked+.switch-track{background:#ef3024}.manual-switch input:checked+.switch-track:after{transform:translateX(18px)}.manual-switch input:focus-visible+.switch-track{outline:2px solid white;outline-offset:3px}

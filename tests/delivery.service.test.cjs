@@ -109,6 +109,16 @@ function setup() {
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
 
+test('store driver directory loads names and clears on logout; drivers cannot subscribe',()=>{
+ const h=setup();h.signIn({uid:'store'});h.emitDocument('users/store',{role:'STORE'});
+ const listener=h.active('users');assert.ok(listener);
+ h.emitCollection('users',[{id:'d1',role:'DRIVER',name:'João'},{id:'s1',role:'STORE',name:'Loja'}]);
+ assert.equal(h.service.driverNames().d1,'João');assert.equal(h.service.driverNames().s1,undefined);
+ h.signIn(null);assert.equal(Object.keys(h.service.driverNames()).length,0);assert.equal(listener.stopped,true);
+ listener.next({docs:[{id:'late',data:()=>({role:'DRIVER',name:'Late'})}]});assert.equal(Object.keys(h.service.driverNames()).length,0);
+ h.signIn({uid:'driver'});h.emitDocument('users/driver',{role:'DRIVER'});assert.equal(h.active('users'),undefined);
+});
+
 test('receipt confirmation marks private and public paid atomically with completion',async()=>{
  const h=setup();loadStaff(h);h.emitCollection('shipments/s1/deliveries',[{...order,id:'d1',trackingToken:'token1',status:'WAITING'}]);
  await h.service.confirm('d1',30);

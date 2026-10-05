@@ -1,0 +1,22 @@
+<section class="settlement" aria-labelledby="settlement-title">
+  <div class="heading"><div><p class="eyebrow">TAXAS POR ENTREGADOR</p><h2 id="settlement-title">Fechamento por período</h2></div><div class="shortcuts"><button type="button" (click)="week(0)">Esta semana</button><button type="button" (click)="week(-1)">Semana anterior</button></div></div>
+  <p class="hint">Somamos as taxas das entregas concluídas no período, pelo horário de Brasília. Este resumo não registra nem confirma repasses aos entregadores.</p>
+  <div class="dates"><label>Data inicial<input type="date" [(ngModel)]="start" aria-label="Data inicial do fechamento"></label><label>Data final<input type="date" [(ngModel)]="end" aria-label="Data final do fechamento"></label></div>
+  @if(loading){<p role="status">Carregando entregas…</p>}
+  @else if(error){<p class="warning" role="alert">{{error}}</p>}
+  @else{
+    @let totals=summary;
+    @if(totals.error){<p class="warning" role="alert">{{totals.error}}</p>}
+    @else{
+      <div class="totals"><div><small>Entregas concluídas</small><strong>{{totals.count}}</strong></div><div><small>Total das taxas</small><strong>{{totals.feeCents / 100 | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</strong></div></div>
+      @if(totals.missingDates){<p class="warning">{{totals.missingDates}} entrega(s) concluída(s) sem data de conclusão válida foram excluídas; não é possível determinar o período delas.</p>}
+      @if(totals.invalidFees){<p class="warning">{{totals.invalidFees}} entrega(s) no período têm taxa inválida e foram excluídas dos totais.</p>}
+      @for(group of totals.groups;track group.driverId){
+        <details class="driver-group"><summary><div><b>{{name(group.driverId)}}</b><small>{{group.count}} entrega(s){{group.driverId===null?' · sem atribuição':''}}</small></div><strong>{{group.feeCents / 100 | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</strong></summary>
+          @if(group.driverId===null){<p class="warning">Estas taxas não foram atribuídas a nenhum entregador.</p>}
+          @for(day of group.days;track day.key){<div class="day"><h3>{{day.key | date:'dd/MM/yyyy'}} <span>{{day.feeCents / 100 | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</span></h3><ul>@for(delivery of day.deliveries;track $index){<li><span>{{delivery.customerName}}</span><b>{{delivery.deliveryFee | currency:'BRL':'symbol':'1.2-2':'pt-BR'}}</b></li>}</ul></div>}
+        </details>
+      }@empty{<p class="hint">Nenhuma entrega concluída com taxa válida neste período.</p>}
+    }
+  }
+</section>

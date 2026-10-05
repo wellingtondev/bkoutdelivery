@@ -22,6 +22,7 @@
   @if(showZones()){
     <app-delivery-zones-editor [zones]="zonesService.config()" [saving]="savingZones()" [error]="zonesSaveError()" (saveZones)="saveZones($event)" (closed)="showZones.set(false)"></app-delivery-zones-editor>
   }
+  <app-driver-settlement [deliveries]="svc.deliveries()" [driverNames]="svc.driverNames()" [loading]="svc.loading()" [error]="svc.error()"></app-driver-settlement>
   @if(!svc.loading() && !svc.error()) { <app-monthly-summary [deliveries]="svc.deliveries()" [selectedDate]="selectedDate()" [deliveryCounts]="deliveryCounts()" (dateSelected)="selectDate($event)"></app-monthly-summary> }
   @if (svc.error()) { <p class="feedback" role="alert">{{svc.error()}}</p> }
   @if (svc.loading()) {
@@ -134,6 +135,7 @@
     </div>
   }
 </main>
+
 
 
 

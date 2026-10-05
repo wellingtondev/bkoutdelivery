@@ -15,6 +15,9 @@ export class DeliveryService implements OnDestroy {
   readonly deliveries = signal<Delivery[]>([]);
   readonly error = signal('');
   readonly loading = signal(true);
+  readonly driverNames = signal<Record<string,string>>({});
+  private stopDriverProfiles?:()=>void;
+  private staffGeneration=0;
   private shipmentSubscription?: Subscription;
   private stopProfile?: () => void;
   private deliverySubscriptions = new Map<string, Subscription>();
@@ -26,12 +29,23 @@ export class DeliveryService implements OnDestroy {
     this.stopProfile = onSnapshot(doc(db, 'users', user.uid), profile => {
       this.clearStaffData();
       const data = profile.data();
-      if (data && data['active'] !== false && ['STORE', 'DRIVER'].includes(data['role'])) this.listenStaffData();
+      if (data && data['active'] !== false && ['STORE', 'DRIVER'].includes(data['role'])) {
+        this.listenStaffData();
+        const generation=this.staffGeneration;
+        if(data['role']==='STORE')this.stopDriverProfiles=onSnapshot(collection(db,'users'),snapshot=>{
+          if(generation!==this.staffGeneration)return;
+          const names:Record<string,string>={};
+          snapshot.docs.forEach(item=>{const profile=item.data();if(profile['role']==='DRIVER')names[item.id]=String(profile['name']||profile['email']||item.id);});
+          this.driverNames.set(names);
+        },()=>{if(generation===this.staffGeneration)this.driverNames.set({});});
+      }
       else this.loading.set(false);
     }, () => { this.clearStaffData(); this.loading.set(false); this.error.set('Não foi possível carregar o perfil.'); });
   });
 
   private clearStaffData(): void {
+    this.staffGeneration++;
+    this.stopDriverProfiles?.();this.stopDriverProfiles=undefined;this.driverNames.set({});
     this.shipmentSubscription?.unsubscribe();
     this.deliverySubscriptions.forEach(subscription => subscription.unsubscribe());
     this.deliverySubscriptions.clear();
