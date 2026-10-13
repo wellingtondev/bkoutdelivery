@@ -61,9 +61,12 @@ export class LocationService implements OnDestroy {
         this.pending = this.pending.then(async () => {
           if (generation !== this.generation) return;
           await runTransaction(db, async transaction => {
-            const snapshot = await transaction.get(privateRef);
+            const tracking = (await transaction.get(publicRef)).data();
+            if(tracking?.['deliveryId']!==delivery.id || typeof tracking['shipmentId']!=='string' || !tracking['shipmentId'] || tracking['shipmentId'].includes('/')) throw new Error('O compartilhamento foi encerrado para esta entrega.');
+            const currentRef=doc(db,'shipments',tracking['shipmentId'],'deliveries',delivery.id);
+            const snapshot = await transaction.get(currentRef);
             const current = snapshot.data();
-            if (!current || current['status'] !== 'OUT_FOR_DELIVERY' || current['driverId'] !== uid) throw new Error('O compartilhamento foi encerrado para esta entrega.');
+            if (generation!==this.generation || auth.currentUser?.uid!==uid || !current || current['status'] !== 'OUT_FOR_DELIVERY' || current['driverId'] !== uid) throw new Error('O compartilhamento foi encerrado para esta entrega.');
             transaction.update(publicRef, {
               trackingActive: true,
               driverLocation: { lat, lng, accuracy, updatedAt: serverTimestamp() }
@@ -99,11 +102,14 @@ export class LocationService implements OnDestroy {
     this.cancelWatch();
     await this.pending;
     if (delivery && uid && auth.currentUser?.uid === uid) {
-      const privateRef = doc(db, 'shipments', delivery.shipmentId, 'deliveries', delivery.id);
+      const publicRef=doc(db,'tracking',delivery.trackingToken);
       await runTransaction(db, async transaction => {
+        const tracking=(await transaction.get(publicRef)).data();
+        if(tracking?.['deliveryId']!==delivery.id || typeof tracking['shipmentId']!=='string' || !tracking['shipmentId'] || tracking['shipmentId'].includes('/'))return;
+        const privateRef=doc(db,'shipments',tracking['shipmentId'],'deliveries',delivery.id);
         const snapshot = await transaction.get(privateRef);
-        if (snapshot.data()?.['driverId'] === uid) {
-          transaction.update(doc(db, 'tracking', delivery.trackingToken), { trackingActive: false, driverLocation: null });
+        if (auth.currentUser?.uid===uid && snapshot.data()?.['driverId'] === uid) {
+          transaction.update(publicRef, { trackingActive: false, driverLocation: null });
         }
       });
     }

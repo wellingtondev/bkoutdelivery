@@ -2,8 +2,24 @@ import type { Delivery, Shipment } from '../../models/models';
 import { cents, completionDate, saoPauloDate } from '../monthly-summary/monthly-summary';
 
 export interface DriverShipmentGroup { shipmentId: string; shipment?: Shipment; deliveries: Delivery[]; }
-export interface DriverHistoryDay { key: string; day: number; count: number; groups: DriverShipmentGroup[]; }
+export interface DriverHistoryDay { key: string; day: number; count: number; feeCents: number; groups: DriverShipmentGroup[]; }
 export interface DriverHistory { todayFeeCents: number; todayCount: number; monthCount: number; missingDates: number; offset: number; days: DriverHistoryDay[]; }
+
+export function driverPeriod(deliveries: Delivery[], driverId: string, start: string, end: string) {
+  const result = { count: 0, feeCents: 0, invalidFees: 0 };
+  if (!driverId || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return result;
+  for (const delivery of deliveries) {
+    if (delivery.driverId !== driverId || delivery.status !== 'DELIVERED') continue;
+    const completed = completionDate(delivery.deliveredAt);
+    if (!completed) continue;
+    const day = saoPauloDate(completed);
+    if (day < start || day > end) continue;
+    result.count++;
+    if (Number.isFinite(delivery.deliveryFee) && delivery.deliveryFee >= 0) result.feeCents += cents(delivery.deliveryFee);
+    else result.invalidFees++;
+  }
+  return result;
+}
 
 export function driverHistory(deliveries: Delivery[], shipments: Shipment[], driverId: string, year: number, month: number, now: Date = new Date()): DriverHistory {
   const today = saoPauloDate(now);
@@ -11,7 +27,7 @@ export function driverHistory(deliveries: Delivery[], shipments: Shipment[], dri
   const result: DriverHistory = {
     todayFeeCents: 0, todayCount: 0, monthCount: 0, missingDates: 0,
     offset: new Date(Date.UTC(year, month, 1)).getUTCDay(),
-    days: Array.from({ length: new Date(Date.UTC(year, month + 1, 0)).getUTCDate() }, (_, index) => ({ key: `${prefix}-${String(index + 1).padStart(2, '0')}`, day: index + 1, count: 0, groups: [] }))
+    days: Array.from({ length: new Date(Date.UTC(year, month + 1, 0)).getUTCDate() }, (_, index) => ({ key: `${prefix}-${String(index + 1).padStart(2, '0')}`, day: index + 1, count: 0, feeCents: 0, groups: [] }))
   };
   if (!driverId) return result;
   const shipmentById = new Map(shipments.map(shipment => [shipment.id, shipment]));
@@ -30,6 +46,7 @@ export function driverHistory(deliveries: Delivery[], shipments: Shipment[], dri
     }
     group.deliveries.push(delivery);
     day.count++;
+    if (Number.isFinite(delivery.deliveryFee) && delivery.deliveryFee >= 0) day.feeCents += cents(delivery.deliveryFee);
     result.monthCount++;
   }
   return result;

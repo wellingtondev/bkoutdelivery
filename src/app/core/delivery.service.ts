@@ -6,7 +6,7 @@ import { Delivery, NewDelivery, PublicTracking, Shipment } from '../models/model
 import { auth, db } from './firebase';
 import { normalizePayment, amountToCollect } from './payment';
 import { routeEntries, routeEntry, routeKey } from './delivery-route';
-import { recurringShipments, saoPauloDay, validDeliveryDate } from './shipment-calendar';
+import { deliveryDay, recurringShipments, saoPauloDay, validDeliveryDate } from './shipment-calendar';
 import { DeliveryZones, deliveryFeeForPoint } from './delivery-zones';
 
 @Injectable({ providedIn: 'root' })
@@ -161,11 +161,10 @@ export class DeliveryService implements OnDestroy {
   async updateDelivery(shipmentId: string, deliveryId: string, input: NewDelivery): Promise<void> {
     const uid=auth.currentUser?.uid;
     if(!uid) throw new Error('Entre novamente para alterar a entrega.');
-    if(input.shipmentId!==shipmentId) throw new Error('Não é possível mudar a remessa nesta edição.');
+    if(!input.shipmentId||input.shipmentId.includes('/')) throw new Error('Selecione uma remessa existente.');
     if(![input.customerName,input.phone,input.address,input.product].every(value=>typeof value==='string' && value.trim())) throw new Error('Preencha os dados da entrega.');
     if(![input.orderValue,input.deliveryFee].every(value=>Number.isFinite(value)&&value>=0)) throw new Error('Informe valores válidos.');
     if(typeof input.paid!=='boolean') throw new Error('Informe a situação do pagamento.');
-    if(!Number.isFinite(input.lat)||!Number.isFinite(input.lng)||Math.abs(input.lat!)>90||Math.abs(input.lng!)>180) throw new Error('Confirme o destino no mapa.');
     if(!input.deliveryDate||!validDeliveryDate(input.deliveryDate)) throw new Error('Informe uma data válida.');
     const payment=normalizePayment(input);
     await runTransaction(db,async transaction=>{
@@ -177,7 +176,24 @@ export class DeliveryService implements OnDestroy {
       const data=snapshot.data();
       if(data['status']==='DELIVERED') throw new Error('Esta entrega foi concluída. Seus dados históricos não podem ser editados.');
       const destinationChanged=data['lat']!==input.lat||data['lng']!==input.lng;
+      const hasDestination=Number.isFinite(input.lat)&&Number.isFinite(input.lng)&&Math.abs(input.lat!)<=90&&Math.abs(input.lng!)<=180;
+      if(!hasDestination && (destinationChanged || input.lat!=null || input.lng!=null || data['manualEntry']!==true)) throw new Error('Confirme o destino no mapa.');
       if(data['paid']&&!input.paid) throw new Error('O pagamento já foi confirmado. Atualize a página antes de editar.');
+      const moving=input.shipmentId!==shipmentId;
+      const targetRef=doc(db,'shipments',input.shipmentId,'deliveries',deliveryId);
+      let deliveryDate=data['deliveryDate'];
+      if(moving){
+        const source=await transaction.get(doc(db,'shipments',shipmentId));
+        const target=await transaction.get(doc(db,'shipments',input.shipmentId));
+        const sourceTime=source.data()?.['time'],targetTime=target.data()?.['time'];
+        const validTime=(value:unknown):value is string=>typeof value==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+        if(!source.exists()||!target.exists()||!validTime(sourceTime)||!validTime(targetTime)) throw new Error('Selecione uma remessa existente.');
+        if(targetTime<=sourceTime) throw new Error('Selecione um horário posterior ao da remessa atual.');
+        const collision=await transaction.get(targetRef);
+        if(collision.exists()) throw new Error('Uma entrega com este identificador já existe na remessa selecionada.');
+        deliveryDate=deliveryDay({...data,shipmentId} as Delivery,[{...source.data(),id:shipmentId} as Shipment]);
+        if(!deliveryDate) throw new Error('Não foi possível preservar o dia da entrega.');
+      }
       const token=data['trackingToken']??data['trackingCode'];
       if(!token) throw new Error('Esta entrega não possui tracking válido.');
       const trackingRef=doc(db,'tracking',token);
@@ -192,9 +208,11 @@ export class DeliveryService implements OnDestroy {
         deliveryFee=quote?.fee??input.deliveryFee;feeZone=quote?.zone??null;
       }
       const peers: {ref:ReturnType<typeof doc>;tracking:ReturnType<typeof doc>|null}[]=[];
+      const manifestRef=data['driverId']?doc(db,'driverLocations',data['driverId']):null;
+      const manifest=manifestRef&&(destinationChanged||moving)?await transaction.get(manifestRef):null;
+      const entries=routeEntries(manifest?.data()?.['routeEntries']);
       if(destinationChanged&&data['driverId']){
-        const manifest=await transaction.get(doc(db,'driverLocations',data['driverId']));
-        for(const entry of routeEntries(manifest.data()?.['routeEntries'])){
+        for(const entry of entries){
           if(entry.id===deliveryId&&entry.shipmentId===shipmentId)continue;
           const peerRef=doc(db,'shipments',entry.shipmentId,'deliveries',entry.id);
           const peer=await transaction.get(peerRef);
@@ -205,13 +223,18 @@ export class DeliveryService implements OnDestroy {
         }
       }
       if(auth.currentUser?.uid!==uid) throw new Error('Sua sessão mudou. Entre novamente.');
-      transaction.update(ref,{
+      const update={
         customerName:input.customerName.trim(),phone:input.phone.trim(),address:input.address.trim(),product:input.product.trim(),
         orderValue:input.orderValue,deliveryFee,feeZone,paid:input.paid,
         notes:payment.notes??'',paymentMethod:payment.paymentMethod??null,installments:payment.installments??null,
-        lat:input.lat,lng:input.lng,updatedAt:serverTimestamp(),...(destinationChanged?{estimatedArrival:null}:{})
-      });
-      transaction.update(trackingRef,{customerName:input.customerName.trim(),product:input.product.trim(),orderValue:input.orderValue,paid:input.paid,destination:{lat:input.lat,lng:input.lng},...(destinationChanged?{estimatedArrival:null}:{})});
+        ...(hasDestination?{lat:input.lat,lng:input.lng}:{}),updatedAt:serverTimestamp(),...(destinationChanged?{estimatedArrival:null}:{})
+      };
+      if(moving){
+        transaction.set(targetRef,{...data,...update,shipmentId:input.shipmentId,deliveryDate});
+        transaction.delete(ref);
+        if(manifestRef&&manifest?.exists())transaction.update(manifestRef,{routeEntries:entries.map(entry=>entry.id===deliveryId&&entry.shipmentId===shipmentId?{...entry,shipmentId:input.shipmentId}:entry)});
+      }else transaction.update(ref,update);
+      transaction.update(trackingRef,{customerName:input.customerName.trim(),product:input.product.trim(),orderValue:input.orderValue,paid:input.paid,...(hasDestination?{destination:{lat:input.lat,lng:input.lng}}:{}),...(moving?{shipmentId:input.shipmentId}:{}),...(destinationChanged?{estimatedArrival:null}:{})});
       for(const peer of peers){transaction.update(peer.ref,{estimatedArrival:null});if(peer.tracking)transaction.update(peer.tracking,{estimatedArrival:null});}
     });
   }

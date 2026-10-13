@@ -9,7 +9,7 @@ const ts = require('typescript');
 const delivery = { id: 'd1', shipmentId: 's1', trackingToken: 't1' };
 const privatePath = 'shipments/s1/deliveries/d1';
 function setup() {
-  const records = new Map([[privatePath, { status: 'WAITING' }], ['tracking/t1', { status: 'WAITING' }]]);
+  const records = new Map([[privatePath, { status: 'WAITING' }], ['tracking/t1', { status: 'WAITING',shipmentId:'s1',deliveryId:'d1' }]]);
   const writes = [], watches = [], cleared = [];
   const auth = { currentUser: { uid: 'driver1' } };
   let authCallback, authStopped = false, beforeTransaction;
@@ -92,6 +92,19 @@ test('stop cancels browser watch, clears public location and ignores stale callb
   assert.equal(h.records.get('tracking/t1').driverLocation, null);
   assert.equal(h.records.get('tracking/t1').trackingActive, false);
   h.position(); await h.flush(); assert.equal(h.writes.length, count);
+});
+test('active GPS follows canonical shipment after later move and stop clears same tracking',async()=>{
+ const h=setup();await h.service.start(delivery);
+ h.records.set('shipments/s2/deliveries/d1',h.records.get(privatePath));h.records.delete(privatePath);h.records.set('tracking/t1',{...h.records.get('tracking/t1'),shipmentId:'s2'});
+ h.position();await h.flush();assert.equal(h.service.error(),'');assert.equal(h.records.get('tracking/t1').trackingActive,true);assert.equal(h.records.get('tracking/t1').driverLocation.lat,-23.55);
+ await h.service.stop();assert.equal(h.records.get('tracking/t1').trackingActive,false);assert.equal(h.records.get('tracking/t1').driverLocation,null);
+});
+test('GPS refuses canonical tracking for different delivery, owner or completed status',async()=>{
+ for(const reason of ['delivery','owner','completed']){
+ const h=setup();await h.service.start(delivery);h.records.set('tracking/t1',{...h.records.get('tracking/t1'),shipmentId:'s2',deliveryId:reason==='delivery'?'other':'d1'});
+ h.records.set('shipments/s2/deliveries/d1',{status:reason==='completed'?'DELIVERED':'OUT_FOR_DELIVERY',driverId:reason==='owner'?'other':'driver1'});h.records.delete(privatePath);
+ const count=h.writes.length;h.position();await h.flush();assert.equal(h.writes.length,count);assert.ok(h.service.error());
+ }
 });
 
 test('logout cancels existing watch and suppresses callbacks; destroy removes auth observer', async () => {

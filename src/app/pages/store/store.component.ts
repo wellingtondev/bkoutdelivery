@@ -207,6 +207,13 @@ export class StoreComponent implements OnDestroy {
 
   readonly selectedDate = signal(saoPauloDay(new Date()));
   readonly shipmentSlots = computed(()=>recurringShipments(this.svc.shipments()));
+  readonly deliveryShipmentOptions = computed(()=>{
+    const original=this.editing();
+    if(!original)return this.shipmentSlots();
+    const current=this.svc.shipments().find(s=>s.id===original.shipmentId);
+    if(!current)return [];
+    return [current,...this.shipmentSlots().filter(slot=>slot.time>current.time)];
+  });
   readonly dailyDeliveries = computed(()=>this.svc.deliveries().filter(d=>deliveryDay(d,this.svc.shipments())===this.selectedDate()));
   readonly deliveryCounts = computed(()=>{
     const counts:Record<string,number>={};
@@ -287,7 +294,7 @@ export class StoreComponent implements OnDestroy {
     this.saving.set(true);
     this.error.set('');
     const original=this.editing();
-    const delivery = { ...this.form, manualEntry:!original && this.manualEntry(), ...(original?{shipmentId:original.shipmentId,deliveryDate:original.deliveryDate ?? deliveryDay(original,this.svc.shipments()) ?? undefined}:{}) };
+    const delivery = { ...this.form, manualEntry:!original && this.manualEntry(), ...(original?{deliveryDate:original.deliveryDate ?? deliveryDay(original,this.svc.shipments()) ?? undefined}:{}) };
     try {
       if(original)await this.svc.updateDelivery(original.shipmentId,original.id,delivery);
       else await this.svc.add(delivery);

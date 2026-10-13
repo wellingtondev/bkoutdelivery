@@ -28,15 +28,18 @@ const base: Delivery = {
 const deliveries = signal<Delivery[]>([
   { ...base, id: 'fixture-1', customerName: 'Ana · demonstração', deliveryDate:'2026-09-26',shipmentId:'old-same-time', status: 'DELIVERED', deliveredAt: new Date(now.getFullYear(), now.getMonth(), Math.max(1, now.getDate() - 1), 14).toISOString() },
   { ...base, id: 'fixture-2', customerName: 'Bruno · demonstração', orderValue: 85.5, deliveryFee: 12, status: 'DELIVERED', deliveredAt: now.toISOString() },
-  { ...base, id: 'fixture-3', customerName: 'Diego · demonstração', paid: false },
+  { ...base, id: 'fixture-3', shipmentId:'fixture-afternoon', customerName: 'Diego · demonstração', paid: false, paymentMethod:'PIX' },
 ]);
-const shipments = signal<Shipment[]>([{ id: 'fixture-shipment', date: today, time: '18:00', status: 'WAITING' },{id:'old-same-time',date:'2026-09-26',time:'18:00',status:'WAITING'}]);
+const shipments = signal<Shipment[]>([{ id: 'fixture-shipment', date: today, time: '18:00', status: 'WAITING' },{id:'old-same-time',date:'2026-09-26',time:'18:00',status:'WAITING'},{id:'fixture-afternoon',date:today,time:'15:30',status:'WAITING'},{id:'fixture-earlier',date:today,time:'12:30',status:'WAITING'}]);
 const previewZones = {
   config: signal<DeliveryZones|null>(null), loading: signal(false), error: signal(''),
   async save(zones:DeliveryZones){const error=validateDeliveryZones(zones);if(error)throw new Error(error);this.config.set(structuredClone(zones));}
 };
 const service = {
-  shipments, deliveries, error: signal(''), loading: signal(false),
+  shipments, deliveries, error: signal(''), loading: signal(false), driverNames:signal<Record<string,string>>({}),
+  async updateDelivery(shipmentId:string,id:string,input:NewDelivery):Promise<void> {
+    deliveries.update(items=>items.map(item=>item.shipmentId===shipmentId&&item.id===id?{...item,...input}:item));
+  },
   async createShipment(shipment: Pick<Shipment, 'date' | 'time'>): Promise<string> {
     const id = `fixture-${crypto.randomUUID()}`;
     shipments.update(items => [...items, { ...shipment, id, status: 'WAITING' }]);

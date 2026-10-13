@@ -12,9 +12,21 @@ function load(relative, dependencies = {}) {
   return api;
 }
 const dates = load('../src/app/components/monthly-summary/monthly-summary.ts');
-const { driverHistory } = load('../src/app/components/driver-history/driver-history.ts', { '../monthly-summary/monthly-summary': dates });
+const { driverHistory, driverPeriod } = load('../src/app/components/driver-history/driver-history.ts', { '../monthly-summary/monthly-summary': dates });
 const now = new Date('2026-10-01T13:00:00Z');
 const delivery = (overrides = {}) => ({ id: 'one', driverId: 'driver-one', shipmentId: 'shipment-one', status: 'DELIVERED', deliveredAt: '2026-10-01T03:00:00Z', customerName: 'Ana', product: 'Pedido', ...overrides });
+test('period sums inclusive dates across months only for own completed deliveries',()=>{
+ const data=[delivery({deliveredAt:'2026-10-01T02:59:00Z',deliveryFee:12}),delivery({deliveryFee:15}),delivery({driverId:'other',deliveryFee:100}),delivery({status:'WAITING',deliveryFee:100})];
+ const result=driverPeriod(data,'driver-one','2026-09-30','2026-10-01');
+ assert.equal(result.count,2);assert.equal(result.feeCents,2700);
+ assert.equal(driverPeriod(data,'driver-one','2026-10-01','2026-10-01').feeCents,1500);
+ assert.equal(driverPeriod(data,'','2026-09-30','2026-10-01').count,0);
+ assert.equal(driverPeriod(data,'driver-one','2026-10-01','2026-09-30').count,0);
+});
+test('calendar selection reads fees for each historical day instead of today',()=>{
+ const result=driverHistory([delivery({deliveryFee:66}),delivery({deliveredAt:'2026-09-08T15:00:00Z',deliveryFee:12}),delivery({deliveredAt:'2026-09-08T16:00:00Z',deliveryFee:15}),delivery({deliveredAt:'2026-09-09T15:00:00Z',deliveryFee:10})],[],'driver-one',2026,8,now);
+ assert.equal(result.todayFeeCents,6600);assert.equal(result.days[7].feeCents,2700);assert.equal(result.days[8].feeCents,1000);
+});
 
 test('includes only authenticated driver completed deliveries, never legacy unassigned or other drivers', () => {
   const data = [delivery(), delivery({ driverId: 'driver-two' }), delivery({ driverId: undefined }), delivery({ status: 'WAITING' }), delivery({ status: 'OUT_FOR_DELIVERY' })];

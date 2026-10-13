@@ -108,6 +108,39 @@ function setup() {
 }
 
 const order = { shipmentId: 's1', customerName: 'Cliente', phone: '11999999999', address: 'Rua particular, 10', product: 'Pedido', orderValue: 25, deliveryFee: 5, paid: false, paymentMethod: 'PIX', lat: -23.55, lng: -46.63 };
+function shipmentMove(){
+ const h=setup();h.signIn({uid:'store'});h.records.set('users/store',{role:'STORE'});
+ h.records.set('shipments/s1',{time:'15:30',date:'2026-09-20'});h.records.set('shipments/s2',{time:'18:00',date:'2026-10-01'});
+ h.records.set('shipments/s1/deliveries/d1',{...order,deliveryDate:'2026-09-29',trackingToken:'token',status:'OUT_FOR_DELIVERY',driverId:'driver',routeOrder:2,deliveryFee:12});
+ h.records.set('tracking/token',{shipmentId:'s1',deliveryId:'d1',routePosition:2});
+ h.records.set('driverLocations/driver',{routeEntries:[{id:'other',shipmentId:'s1',trackingToken:'other'},{id:'d1',shipmentId:'s1',trackingToken:'token'}]});return h;
+}
+test('later shipment move preserves same day, ID, link, operational fields and ordered route atomically',async()=>{
+ const h=shipmentMove();await h.service.updateDelivery('s1','d1',{...order,shipmentId:'s2',deliveryDate:'2099-01-01'});
+ assert.equal(h.records.has('shipments/s1/deliveries/d1'),false);const moved=h.records.get('shipments/s2/deliveries/d1');
+ for(const [key,value] of Object.entries({deliveryDate:'2026-09-29',trackingToken:'token',status:'OUT_FOR_DELIVERY',driverId:'driver',routeOrder:2,deliveryFee:12,shipmentId:'s2'}))assert.equal(moved[key],value);
+ assert.equal(h.records.get('tracking/token').shipmentId,'s2');assert.equal(h.records.get('tracking/token').routePosition,2);
+ assert.deepEqual(JSON.parse(JSON.stringify(h.records.get('driverLocations/driver').routeEntries)),[{id:'other',shipmentId:'s1',trackingToken:'other'},{id:'d1',shipmentId:'s2',trackingToken:'token'}]);assert.equal(h.batches.length,1);assert.equal(h.batches[0].committed,true);
+});
+test('later shipment move rejects earlier/equal times, missing slot, collision, completed and unauthorized without writes',async()=>{
+ for(const reason of ['earlier','equal','invalid','missing','collision','completed','unauthorized']){
+ const h=shipmentMove();
+ if(reason==='earlier')h.records.set('shipments/s2',{time:'12:00'});if(reason==='equal')h.records.set('shipments/s2',{time:'15:30'});if(reason==='invalid')h.records.set('shipments/s2',{time:'invalid'});if(reason==='missing')h.records.delete('shipments/s2');if(reason==='collision')h.records.set('shipments/s2/deliveries/d1',{customerName:'Existing'});
+ if(reason==='completed')h.records.get('shipments/s1/deliveries/d1').status='DELIVERED';if(reason==='unauthorized')h.records.set('users/store',{role:'DRIVER'});
+ await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,shipmentId:'s2',deliveryDate:'2026-09-29'}),reason==='earlier'||reason==='equal'?/posterior/:reason==='completed'?/concluída/:reason==='unauthorized'?/loja/:reason==='collision'?/existe/:/existente/);
+ assert.equal(h.batches.flatMap(b=>b.writes).length,0);
+ }
+});
+test('later shipment move preserves legacy creation day in Sao Paulo and unknown manual coordinates',async()=>{
+ const h=shipmentMove(),original=h.records.get('shipments/s1/deliveries/d1');delete original.deliveryDate;delete original.lat;delete original.lng;original.manualEntry=true;original.createdAt='2026-09-30T01:00:00Z';
+ await h.service.updateDelivery('s1','d1',{...order,lat:undefined,lng:undefined,shipmentId:'s2',deliveryDate:'2026-09-20'});
+ const moved=h.records.get('shipments/s2/deliveries/d1');assert.equal(moved.deliveryDate,'2026-09-29');assert.equal(moved.manualEntry,true);assert.equal('lat' in moved,false);
+});
+test('later shipment denied transaction preserves source delivery, tracking and route',async()=>{
+ const h=shipmentMove();h.failCommit(new Error('permission-denied'));
+ await assert.rejects(()=>h.service.updateDelivery('s1','d1',{...order,shipmentId:'s2',deliveryDate:'2026-09-29'}),/permission-denied/);
+ assert.equal(h.records.has('shipments/s1/deliveries/d1'),true);assert.equal(h.records.has('shipments/s2/deliveries/d1'),false);assert.equal(h.records.get('tracking/token').shipmentId,'s1');assert.equal(h.records.get('driverLocations/driver').routeEntries[1].shipmentId,'s1');
+});
 
 test('store driver directory loads names and clears on logout; drivers cannot subscribe',()=>{
  const h=setup();h.signIn({uid:'store'});h.emitDocument('users/store',{role:'STORE'});
