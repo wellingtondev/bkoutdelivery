@@ -153,7 +153,7 @@ export class DriverComponent implements OnInit, OnDestroy {
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(destination);
   }
   async confirm(id: string): Promise<void> {
-    if (this.pending().includes(id)) return;
+    if (this.pending().includes(id)) return; 
     const delivery=this.jobs().find(item=>item.id===id);
     if(!delivery)return;
     if(!delivery.paid){
