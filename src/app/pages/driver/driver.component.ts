@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { RouteEstimator, ROUTE_ORIGIN_ADDRESS } from '../../core/route-estimator';
 import { CommonModule } from '@angular/common';
 import { DeliveryService } from '../../core/delivery.service';
@@ -9,6 +9,7 @@ import { amountToCollect, paymentLabel } from '../../core/payment';
 import { Delivery } from '../../models/models';
 import { DriverHistoryComponent } from '../../components/driver-history/driver-history.component';
 import { driverDayGroups } from './driver-groups';
+import { isDeliveryExpired } from '../../core/delivery-expiration';
 
 @Component({
   standalone: true,
@@ -71,7 +72,7 @@ import { driverDayGroups } from './driver-groups';
   `,
   styles: [`.route-planner{margin-top:20px}.route-stop{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #333}.route-stop>div{display:flex;gap:8px}.route-stop span{overflow-wrap:anywhere}.shipment-group{margin-top:28px}.delivery-toggle{display:flex;justify-content:space-between;width:100%;background:none;border:0;color:inherit;font-size:20px;text-align:left;cursor:pointer}.collection{display:grid;gap:6px;border:1px solid #f3b34c;background:#352513;padding:16px;border-radius:12px;color:#ffe0a3}.collection strong{font-size:28px}.collection.paid{border-color:#285d40;background:#142b20;color:#9ee0b8}.delivery-note{padding:14px;background:#242429;border-left:3px solid #ed3024;margin:16px 0;white-space:pre-wrap;overflow-wrap:anywhere}.whatsapp{background:#176d42}.statusbar small{display:block;margin-top:6px}.feedback{color:#ff8b83}.job .actions{flex-wrap:wrap}.job .actions .btn{flex:1;min-width:150px}.job h3{margin-bottom:4px}.open-title{margin-top:36px;padding-top:26px;border-top:1px solid #29292e}`]
 })
-export class DriverComponent implements OnDestroy {
+export class DriverComponent implements OnInit, OnDestroy {
   readonly originAddress = ROUTE_ORIGIN_ADDRESS;
   private routeRequest?: AbortController;
   readonly routeIds = signal<string[]>([]);
@@ -127,8 +128,25 @@ export class DriverComponent implements OnDestroy {
   }
   readonly error = signal('');
   readonly pending = signal<string[]>([]);
-  readonly jobs = computed(() => this.svc.deliveries().filter(delivery => delivery.status !== 'DELIVERED' && (!delivery.driverId || delivery.driverId === this.auth.user?.uid)));
+  private readonly expirationClock = signal(new Date());
+  private expirationTimer?: ReturnType<typeof setInterval>;
+  private readonly refreshExpirationClock = (): void => {
+    const now = new Date();
+    this.expirationClock.set(now);
+    const active = this.location.activeDeliveryId();
+    const delivery = active ? this.svc.deliveries().find(item => item.id === active) : undefined;
+    if (active && !this.svc.loading() && (!delivery || isDeliveryExpired(delivery, this.svc.shipments(), now))) void this.stopGps();
+  };
+  readonly jobs = computed(() => this.svc.deliveries().filter(delivery => delivery.status !== 'DELIVERED'
+    && (!delivery.driverId || delivery.driverId === this.auth.user?.uid)
+    && !isDeliveryExpired(delivery, this.svc.shipments(), this.expirationClock())));
   constructor(public svc: DeliveryService, public location: LocationService, public auth: AuthService, private estimator: RouteEstimator) {}
+  ngOnInit(): void {
+    this.refreshExpirationClock();
+    this.expirationTimer = setInterval(this.refreshExpirationClock, 30000);
+    document.addEventListener('visibilitychange', this.refreshExpirationClock);
+    window.addEventListener('focus', this.refreshExpirationClock);
+  }
   mapUrl(delivery: Delivery): string {
     const destination = Number.isFinite(delivery.lat) && Number.isFinite(delivery.lng)
       ? delivery.lat + ',' + delivery.lng : delivery.address;
@@ -154,6 +172,11 @@ export class DriverComponent implements OnDestroy {
     catch { this.error.set('O GPS parou, mas não foi possível atualizar o cliente. Verifique sua conexão.'); }
   }
   async logout(): Promise<void> { await this.stopGps(); await this.auth.logout(); }
-  ngOnDestroy(): void { this.routeRequest?.abort(); void this.location.stop().catch(() => {}); }
+  ngOnDestroy(): void {
+    if (this.expirationTimer !== undefined) clearInterval(this.expirationTimer);
+    document.removeEventListener('visibilitychange', this.refreshExpirationClock);
+    window.removeEventListener('focus', this.refreshExpirationClock);
+    this.routeRequest?.abort(); void this.location.stop().catch(() => {});
+  }
 }
 
